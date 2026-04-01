@@ -9,7 +9,7 @@ import { setSharedRegistryForTests } from "../../plugins/registry";
 import { portfolioListPlugin } from "../../plugins/builtin/portfolio-list";
 import { StatusBar } from "./status-bar";
 import { Header } from "./header";
-import { buildNativeWindowState, resolveNativeDockDividers, Shell } from "./shell";
+import { buildNativeWindowState, finalizePaneDragRelease, resolveNativeDockDividers, Shell } from "./shell";
 import type { DataProvider } from "../../types/data-provider";
 import type { Quote } from "../../types/financials";
 import type { TickerRecord } from "../../types/ticker";
@@ -158,6 +158,22 @@ function createHeaderDataProvider(): DataProvider {
   };
 }
 
+function HeaderHarness({
+  updateAvailable = null,
+}: {
+  updateAvailable?: ReturnType<typeof createInitialState>["updateAvailable"];
+}) {
+  const initialState = createInitialState(createDefaultConfig("/tmp/gloomberb-header-test"));
+  initialState.updateAvailable = updateAvailable;
+  const [state, dispatch] = useReducer(appReducer, initialState);
+
+  return (
+    <AppContext value={{ state, dispatch }}>
+      <Header />
+    </AppContext>
+  );
+}
+
 function BrokerShellHarness({ pluginRegistry }: { pluginRegistry: PluginRegistry }) {
   const config = createDefaultConfig("/tmp/gloomberb-shell-broker-test");
   const portfolioId = "broker:ibkr-flex:DU12345";
@@ -234,6 +250,47 @@ function BrokerShellHarness({ pluginRegistry }: { pluginRegistry: PluginRegistry
     </AppContext>
   );
 }
+
+describe("Header", () => {
+  test("shows the self-update shortcut for standalone binaries", async () => {
+    testSetup = await testRender(
+      <HeaderHarness updateAvailable={{
+        version: "0.3.0",
+        tagName: "v0.3.0",
+        downloadUrl: "https://example.com/gloomberb",
+        publishedAt: "2026-04-01T00:00:00.000Z",
+        updateAction: { kind: "self" },
+      }} />,
+      { width: 120, height: 2 },
+    );
+
+    await testSetup.renderOnce();
+    const frame = testSetup.captureCharFrame();
+
+    expect(frame).toContain("v0.3.0 available");
+    expect(frame).toContain("press u to update");
+  });
+
+  test("shows the manual npm command when self-update is disabled", async () => {
+    testSetup = await testRender(
+      <HeaderHarness updateAvailable={{
+        version: "0.3.0",
+        tagName: "v0.3.0",
+        downloadUrl: "https://example.com/gloomberb",
+        publishedAt: "2026-04-01T00:00:00.000Z",
+        updateAction: { kind: "manual", command: "npm install -g gloomberb@latest" },
+      }} />,
+      { width: 120, height: 2 },
+    );
+
+    await testSetup.renderOnce();
+    const frame = testSetup.captureCharFrame();
+
+    expect(frame).toContain("v0.3.0 available");
+    expect(frame).toContain("run npm install -g gloomberb@latest");
+    expect(frame).not.toContain("press u to update");
+  });
+});
 
 describe("Shell", () => {
   test("uses the live floating preview rect for native occluders", () => {
@@ -456,6 +513,29 @@ describe("Shell", () => {
     expect(harnessState?.paneState["portfolio-list:main"]?.cashDrawerExpanded).toBe(false);
     expect(layoutUpdates.length).toBe(1);
     expect(toasts).toEqual(["Retiled all panes"]);
+  });
+
+  test("shows the gridlock tip after snapping a pane to a half screen", () => {
+    const config = createDefaultConfig("/tmp/gloomberb-shell-snap-test");
+    const snapLayout = cloneLayout(config.layout);
+    snapLayout.dockRoot = { kind: "pane", instanceId: "portfolio-list:main" };
+    snapLayout.floating = [{ instanceId: "ticker-detail:main", x: 8, y: 2, width: 36, height: 12, zIndex: 75 }];
+
+    const result = finalizePaneDragRelease(
+      snapLayout,
+      "ticker-detail:main",
+      { x: 8, y: 2, width: 36, height: 12 },
+      { kind: "snap", position: "left", rect: { x: 0, y: 0, width: 50, height: 22 } },
+    );
+
+    expect(result.shouldShowGridlockTip).toBe(true);
+    expect(result.nextLayout.floating[0]).toEqual(expect.objectContaining({
+      instanceId: "ticker-detail:main",
+      x: 0,
+      y: 0,
+      width: 50,
+      height: 22,
+    }));
   });
 
   test("closes the focused docked pane with Ctrl+W", async () => {
