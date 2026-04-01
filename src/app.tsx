@@ -55,7 +55,7 @@ import { newsPlugin } from "./plugins/builtin/news";
 import { secPlugin } from "./plugins/builtin/sec";
 import { optionsPlugin } from "./plugins/builtin/options";
 import { notesPlugin } from "./plugins/builtin/notes";
-import { askAiPlugin } from "./plugins/builtin/ask-ai";
+import { aiPlugin } from "./plugins/builtin/ai/index";
 import { gloomberbCloudPlugin } from "./plugins/builtin/chat";
 import { chatController } from "./plugins/builtin/chat-controller";
 import { helpPlugin } from "./plugins/builtin/help";
@@ -71,7 +71,7 @@ import {
 } from "./plugins/prediction-markets/launch";
 import { saveConfig } from "./data/config-store";
 import { Toaster, toast } from "@opentui-ui/toast/react";
-import { checkForUpdate, performUpdate } from "./updater";
+import { canSelfUpdate, checkForUpdate, performUpdate } from "./updater";
 import { VERSION } from "./version";
 import { join } from "path";
 import {
@@ -103,6 +103,7 @@ import {
   PaneTemplateInfoStep,
   PaneTemplateInputStep,
   PaneTemplateSelectStep,
+  PaneTemplateTextareaStep,
 } from "./components/pane-template-wizard";
 import {
   applyPaneSettingFieldValue as applyPaneSettingFieldValueShared,
@@ -196,11 +197,15 @@ function AppInner({ pluginRegistry, tickerRepository, dataProvider, marketData, 
         ? await dialog.prompt<string>({
           content: (ctx) => <PaneTemplateSelectStep {...ctx} step={step} />,
         })
+        : step.type === "textarea"
+          ? await dialog.prompt<string>({
+            content: (ctx) => <PaneTemplateTextareaStep {...ctx} step={step} />,
+          })
         : await dialog.prompt<string>({
           content: (ctx) => <PaneTemplateInputStep {...ctx} step={step} />,
         });
 
-      if (result === undefined || (step.type === "select" && !result)) {
+      if (result === undefined || ((step.type === "select" || step.type === "textarea") && !result)) {
         return null;
       }
 
@@ -1046,8 +1051,19 @@ function AppInner({ pluginRegistry, tickerRepository, dataProvider, marketData, 
     if (!template) return;
 
     let resolvedOptions = options;
-    if (template.wizard && template.wizard.length > 0 && !options?.arg && !options?.values) {
-      const values = await runPaneTemplateWizard(template.wizard);
+    const shouldRunDialogWizard = !!template.wizard
+      && template.wizard.length > 0
+      && !options?.values
+      && (!options?.arg || template.wizard.some((step) => step.type === "textarea"));
+    if (shouldRunDialogWizard && template.wizard) {
+      const wizardSteps = options?.arg && template.shortcut?.argPlaceholder
+        ? template.wizard.map((step) => (
+          step.key === template.shortcut?.argPlaceholder
+            ? { ...step, defaultValue: options.arg }
+            : step
+        ))
+        : template.wizard;
+      const values = await runPaneTemplateWizard(wizardSteps);
       if (!values) return;
       resolvedOptions = {
         ...options,
@@ -1291,7 +1307,7 @@ function AppInner({ pluginRegistry, tickerRepository, dataProvider, marketData, 
       if (actions.length > 0 && ticker) {
         dispatch({ type: "SET_COMMAND_BAR", open: true, query: "" });
       }
-    } else if (event.name === "u" && state.updateAvailable && !state.updateProgress) {
+    } else if (event.name === "u" && state.updateAvailable && !state.updateProgress && canSelfUpdate(state.updateAvailable)) {
       performUpdate(state.updateAvailable, (progress) => {
         dispatch({ type: "SET_UPDATE_PROGRESS", progress });
       });
@@ -1383,7 +1399,7 @@ export function App({
     pluginRegistry.register(secPlugin);
     pluginRegistry.register(optionsPlugin);
     pluginRegistry.register(notesPlugin);
-    pluginRegistry.register(askAiPlugin);
+    pluginRegistry.register(aiPlugin);
     pluginRegistry.register(helpPlugin);
     pluginRegistry.register(comparisonChartPlugin);
     pluginRegistry.register(predictionMarketsPlugin);
