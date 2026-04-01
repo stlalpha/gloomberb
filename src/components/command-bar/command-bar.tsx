@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
-import { TextAttributes, type InputRenderable } from "@opentui/core";
+import { TextAttributes, type InputRenderable, type TextareaRenderable } from "@opentui/core";
 import { useRenderer, useTerminalDimensions } from "@opentui/react";
 import { Spinner } from "../spinner";
 import { Button, NumberField, TextField } from "../ui";
@@ -159,9 +159,9 @@ type WorkflowStringValues = Record<string, string>;
 const commandBarLog = debugLog.createLogger("command-bar");
 
 function getInputRef(
-  store: Record<string, RefObject<InputRenderable | null>>,
+  store: Record<string, RefObject<InputRenderable | TextareaRenderable | null>>,
   fieldId: string,
-): RefObject<InputRenderable | null> {
+): RefObject<InputRenderable | TextareaRenderable | null> {
   if (!store[fieldId]) {
     store[fieldId] = { current: null };
   }
@@ -234,7 +234,7 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
   const previousRootSelectionContextRef = useRef<{ query: string; mode: string } | null>(null);
   const previousRootModeRef = useRef(rootModeInfo.kind);
   const rootThemeBaseIdRef = useRef<string | null>(null);
-  const workflowInputRefs = useRef<Record<string, RefObject<InputRenderable | null>>>({});
+  const workflowInputRefs = useRef<Record<string, RefObject<InputRenderable | TextareaRenderable | null>>>({});
   const visibleListStateRef = useRef<ListScreenState | null>(null);
   const currentRoute = routeStack[routeStack.length - 1] ?? null;
   const currentRouteRef = useRef<CommandBarRoute | null>(currentRoute);
@@ -1132,7 +1132,37 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
     }
   }, []);
 
+  function readWorkflowTextareaValue(fieldId: string, fallback = ""): string {
+    const ref = getInputRef(workflowInputRefs.current, fieldId).current;
+    const nextValue = (ref as TextareaRenderable | null)?.editBuffer?.getText?.();
+    return typeof nextValue === "string" ? nextValue : fallback;
+  }
+
+  function getWorkflowFieldStringValue(
+    field: CommandBarWorkflowField,
+    value: CommandBarFieldValue | undefined,
+  ): string {
+    return field.type === "textarea"
+      ? readWorkflowTextareaValue(field.id, coerceFieldString(value))
+      : coerceFieldString(value);
+  }
+
+  function syncWorkflowTextareaField(fieldId: string, fallback = ""): string {
+    const nextValue = readWorkflowTextareaValue(fieldId, fallback);
+    updateWorkflowValue(fieldId, nextValue);
+    return nextValue;
+  }
+
+  function syncActiveWorkflowTextarea(route: CommandBarWorkflowRoute | null): void {
+    if (route?.kind !== "workflow") return;
+    const visibleFields = getVisibleWorkflowFields(route.fields, route.values);
+    const activeField = visibleFields.find((field) => field.id === route.activeFieldId) ?? visibleFields[0];
+    if (activeField?.type !== "textarea") return;
+    syncWorkflowTextareaField(activeField.id, coerceFieldString(route.values[activeField.id]));
+  }
+
   const submitWorkflowRoute = useCallback(async (route: CommandBarWorkflowRoute) => {
+    syncActiveWorkflowTextarea(route);
     const visibleFields = getVisibleWorkflowFields(route.fields, route.values);
     for (const field of visibleFields) {
       if (!field.required) continue;
@@ -1147,7 +1177,7 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
         }
         continue;
       }
-      if (!coerceFieldString(value).trim()) {
+      if (!getWorkflowFieldStringValue(field, value).trim()) {
         updateTopRoute((current) => current.kind === "workflow"
           ? { ...current, error: `${field.label} is required.` }
           : current);
@@ -1212,7 +1242,7 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
             } else if (field.type === "multi-select" || field.type === "ordered-multi-select") {
               values[field.id] = coerceFieldValues(route.values[field.id]).join(",");
             } else {
-              values[field.id] = coerceFieldString(route.values[field.id]);
+              values[field.id] = getWorkflowFieldStringValue(field, route.values[field.id]);
             }
           }
           await command.execute(values);
@@ -1232,7 +1262,7 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
             } else if (field.type === "multi-select" || field.type === "ordered-multi-select") {
               values[field.id] = coerceFieldValues(route.values[field.id]).join(",");
             } else {
-              values[field.id] = coerceFieldString(route.values[field.id]);
+              values[field.id] = getWorkflowFieldStringValue(field, route.values[field.id]);
             }
           }
           const createOptions: PaneTemplateCreateOptions = {
@@ -1290,8 +1320,10 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
     createWatchlist,
     dispatch,
     extractBrokerWorkflowValues,
+    getWorkflowFieldStringValue,
     pluginRegistry,
     state.config.activeLayoutIndex,
+    syncActiveWorkflowTextarea,
     updateTopRoute,
   ]);
 
@@ -1323,7 +1355,11 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
 
   const shouldOpenTemplateConfig = useCallback((template: PaneTemplateDef, arg?: string): boolean => {
     if (template.wizard && template.wizard.length > 0) {
-      return !arg?.trim();
+      if (!arg?.trim()) {
+        return true;
+      }
+      const argPlaceholder = template.shortcut?.argPlaceholder;
+      return template.wizard.some((step) => step.type === "textarea" || step.key !== argPlaceholder);
     }
     if (template.shortcut?.argPlaceholder === "ticker" || template.shortcut?.argPlaceholder === "tickers") {
       return !arg?.trim();
@@ -1440,7 +1476,7 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
       return;
     }
 
-    if (!trimmedArg && shouldOpenTemplateConfig(template, trimmedArg)) {
+    if (shouldOpenTemplateConfig(template, trimmedArg)) {
       openPaneTemplateWorkflow(template, { arg: trimmedArg });
       return;
     }
@@ -3685,6 +3721,7 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
 
   const moveWorkflowFocus = useCallback((delta: number) => {
     if (currentRoute?.kind !== "workflow") return;
+    syncActiveWorkflowTextarea(currentRoute);
     const visibleFields = getVisibleWorkflowFields(currentRoute.fields, currentRoute.values);
     if (visibleFields.length === 0) return;
     const currentIndex = Math.max(0, visibleFields.findIndex((field) => field.id === currentRoute.activeFieldId));
@@ -3692,9 +3729,10 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
     updateTopRoute((route) => route.kind === "workflow"
       ? { ...route, activeFieldId: visibleFields[nextIndex]?.id ?? route.activeFieldId }
       : route);
-  }, [currentRoute, updateTopRoute]);
+  }, [currentRoute, syncActiveWorkflowTextarea, updateTopRoute]);
 
   const openWorkflowFieldPicker = useCallback((route: CommandBarWorkflowRoute, field: CommandBarWorkflowField) => {
+    syncActiveWorkflowTextarea(route);
     if (field.type === "toggle") {
       updateWorkflowValue(field.id, !coerceFieldBoolean(route.values[field.id]));
       return;
@@ -3743,7 +3781,7 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
         },
       });
     }
-  }, [openPickerRoute, updateWorkflowValue]);
+  }, [openPickerRoute, syncActiveWorkflowTextarea, updateWorkflowValue]);
 
   const activateListSelection = useCallback((options?: { secondary?: boolean; item?: ResultItem }) => {
     const listState = visibleListStateRef.current;
@@ -4073,11 +4111,23 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
       if (currentRoute?.kind === "workflow") {
         const visibleFields = getVisibleWorkflowFields(currentRoute.fields, currentRoute.values);
         const activeField = visibleFields.find((field) => field.id === currentRoute.activeFieldId) ?? visibleFields[0];
+        const activeTextarea = activeField?.type === "textarea";
 
         if (event.name === "tab") {
           event.stopPropagation();
           event.preventDefault();
           moveWorkflowFocus(event.shift ? -1 : 1);
+          return;
+        }
+
+        if (activeTextarea && event.ctrl && event.name === "s") {
+          event.stopPropagation();
+          event.preventDefault();
+          void submitWorkflowRoute(currentRoute);
+          return;
+        }
+
+        if (activeTextarea && (event.name === "up" || event.name === "down" || (event.ctrl && (event.name === "p" || event.name === "n")))) {
           return;
         }
 
@@ -4457,6 +4507,7 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
               backgroundColor={active ? colors.panel : paletteBg}
               onMouseDown={(event: any) => {
                 event.stopPropagation?.();
+                syncActiveWorkflowTextarea(currentRoute);
                 updateTopRoute((route) => route.kind === "workflow"
                   ? { ...route, activeFieldId: field.id, error: null }
                   : route);
@@ -4473,7 +4524,7 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
               {isWorkflowTextField(field) ? (
                 field.type === "number" ? (
                   <NumberField
-                    inputRef={getInputRef(workflowInputRefs.current, field.id)}
+                    inputRef={getInputRef(workflowInputRefs.current, field.id) as RefObject<InputRenderable | null>}
                     value={coerceFieldString(value)}
                     placeholder={field.placeholder}
                     focused={active && !currentRoute.pending}
@@ -4487,9 +4538,46 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
                       }
                     }}
                   />
+                ) : field.type === "textarea" ? (
+                  <box
+                    minHeight={6}
+                    height={6}
+                    border
+                    borderColor={active ? paletteSelectedBg : paletteBg}
+                    backgroundColor={active ? colors.panel : paletteBg}
+                  >
+                    {active ? (
+                      <textarea
+                        key={field.id}
+                        ref={getInputRef(workflowInputRefs.current, field.id) as RefObject<TextareaRenderable | null>}
+                        initialValue={coerceFieldString(value)}
+                        placeholder={field.placeholder || ""}
+                        focused={!currentRoute.pending}
+                        textColor={paletteText}
+                        placeholderColor={paletteSubtleText}
+                        backgroundColor={colors.panel}
+                        flexGrow={1}
+                      />
+                    ) : (
+                      <box flexDirection="column" paddingX={1} paddingY={0}>
+                        {(() => {
+                          const preview = coerceFieldString(value).trim();
+                          const lines = (preview || field.placeholder || "Unset")
+                            .split("\n")
+                            .flatMap((line) => line.match(new RegExp(`.{1,${Math.max(1, barWidth - contentPadding * 2 - 8)}}`, "g")) ?? [""])
+                            .slice(0, 4);
+                          return lines.map((line, index) => (
+                            <box key={`${field.id}:preview:${index}`} height={1}>
+                              <text fg={preview ? paletteText : paletteSubtleText}>{line || " "}</text>
+                            </box>
+                          ));
+                        })()}
+                      </box>
+                    )}
+                  </box>
                 ) : (
                   <TextField
-                    inputRef={getInputRef(workflowInputRefs.current, field.id)}
+                    inputRef={getInputRef(workflowInputRefs.current, field.id) as RefObject<InputRenderable | null>}
                     value={coerceFieldString(value)}
                     placeholder={field.placeholder}
                     focused={active && !currentRoute.pending}
@@ -4520,7 +4608,14 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
               )}
               {field.description && (
                 <box height={1}>
-                  <text fg={paletteSubtleText}>{truncateText(field.description, barWidth - contentPadding * 2)}</text>
+                  <text fg={paletteSubtleText}>
+                    {truncateText(
+                      field.type === "textarea" && active
+                        ? `${field.description} Ctrl+S submits.`
+                        : field.description,
+                      barWidth - contentPadding * 2,
+                    )}
+                  </text>
                 </box>
               )}
             </box>
@@ -4537,9 +4632,11 @@ export function CommandBar({ dataProvider, tickerRepository, pluginRegistry, qui
           </box>
         )}
         <box flexGrow={1} />
-        <box flexDirection="row" gap={1}>
+        <box flexDirection="row" gap={1} justifyContent={visibleFields.some((field) => field.type === "textarea") ? "flex-end" : "flex-start"}>
           <Button label={currentRoute.submitLabel} variant="primary" onPress={() => { void submitWorkflowRoute(currentRoute); }} disabled={currentRoute.pending} />
-          <Button label={currentRoute.cancelLabel || "Back"} variant="ghost" onPress={popRoute} disabled={currentRoute.pending} />
+          {!visibleFields.some((field) => field.type === "textarea") ? (
+            <Button label={currentRoute.cancelLabel || "Back"} variant="ghost" onPress={popRoute} disabled={currentRoute.pending} />
+          ) : null}
         </box>
       </box>
     );
