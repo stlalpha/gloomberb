@@ -1,6 +1,13 @@
 export { ListView } from "./list-view";
 export type { ListViewItem, ListViewProps, ListRowState } from "./list-view";
 
+export { DataTable } from "./data-table";
+export type {
+  DataTableCell,
+  DataTableColumn,
+  DataTableProps,
+} from "./data-table";
+
 export { Tabs } from "./tabs";
 export type { TabItem, TabsProps } from "./tabs";
 
@@ -18,13 +25,27 @@ export type {
 } from "./toggle";
 
 export { TextField, SearchField, NumberField } from "./fields";
-export type { TextFieldProps, SearchFieldProps, NumberFieldProps } from "./fields";
+export type {
+  TextFieldProps,
+  SearchFieldProps,
+  NumberFieldProps,
+} from "./fields";
 
 export { StatusBadge, Notice, EmptyState } from "./status";
-export type { StatusBadgeProps, NoticeProps, EmptyStateProps, StatusTone } from "./status";
+export type {
+  StatusBadgeProps,
+  NoticeProps,
+  EmptyStateProps,
+  StatusTone,
+} from "./status";
 
 export { Section, FieldRow, DialogFrame } from "./frame";
 export type { SectionProps, FieldRowProps, DialogFrameProps } from "./frame";
 
 export { Spinner, ProgressBar, SkeletonRow, LoadingBlock } from "./loading";
-export type { SpinnerProps, ProgressBarProps, SkeletonRowProps, LoadingBlockProps } from "./loading";
+export type {
+  SpinnerProps,
+  ProgressBarProps,
+  SkeletonRowProps,
+  LoadingBlockProps,
+} from "./loading";

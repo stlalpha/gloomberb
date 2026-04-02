@@ -139,16 +139,27 @@ describe("plugin runtime hooks", () => {
 
     function HookProbe() {
       const [paneSelection, setPaneSelection] = usePluginPaneState<number>("selectedIdx", 0);
+      const [venueScope, setVenueScope] = usePluginPaneState<string>("venueScope", "all");
       const [provider, setProvider] = usePluginState<string>("provider", "claude");
       const [mode, setMode] = usePluginConfigState<string>("displayMode", "compact");
 
       useEffect(() => {
         if (paneSelection === 0) setPaneSelection(3);
+        if (venueScope === "all") setVenueScope("kalshi");
         if (provider === "claude") setProvider("codex");
         if (mode === "compact") setMode("expanded");
-      }, [mode, paneSelection, provider, setMode, setPaneSelection, setProvider]);
+      }, [
+        mode,
+        paneSelection,
+        provider,
+        setMode,
+        setPaneSelection,
+        setProvider,
+        setVenueScope,
+        venueScope,
+      ]);
 
-      return <text>{`${paneSelection}|${provider}|${mode}`}</text>;
+      return <text>{`${paneSelection}|${venueScope}|${provider}|${mode}`}</text>;
     }
 
     testSetup = await testRender(<HookHarness />, { width: 40, height: 5 });
@@ -159,10 +170,11 @@ describe("plugin runtime hooks", () => {
     });
 
     const frame = testSetup.captureCharFrame();
-    expect(frame).toContain("3|codex|expanded");
+    expect(frame).toContain("3|kalshi|codex|expanded");
     expect(stateRef.current?.paneState["portfolio-list:main"]?.pluginState).toEqual({
       news: {
         selectedIdx: 3,
+        venueScope: "kalshi",
       },
     });
     expect(stateRef.current?.config.pluginConfig.news).toEqual({

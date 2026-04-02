@@ -119,6 +119,13 @@ export type AppAction =
   | { type: "FOCUS_PANE"; paneId: string }
   | { type: "FOCUS_NEXT"; paneOrder: string[] }
   | { type: "FOCUS_PREV"; paneOrder: string[] }
+  | {
+      type: "UPDATE_PLUGIN_PANE_STATE";
+      paneId: string;
+      pluginId: string;
+      key: string;
+      value: unknown;
+    }
   | { type: "UPDATE_PANE_STATE"; paneId: string; patch: Partial<PaneRuntimeState> };
 
 function getDefaultCollectionId(config: AppConfig): string {
@@ -749,6 +756,31 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           [action.paneId]: nextState,
         },
         recentTickers,
+      };
+    }
+
+    case "UPDATE_PLUGIN_PANE_STATE": {
+      const current = state.paneState[action.paneId] ?? {};
+      const currentPluginState = current.pluginState ?? {};
+      const currentPluginValues = currentPluginState[action.pluginId] ?? {};
+      if (Object.is(currentPluginValues[action.key], action.value)) {
+        return state;
+      }
+      return {
+        ...state,
+        paneState: {
+          ...state.paneState,
+          [action.paneId]: {
+            ...current,
+            pluginState: {
+              ...currentPluginState,
+              [action.pluginId]: {
+                ...currentPluginValues,
+                [action.key]: action.value,
+              },
+            },
+          },
+        },
       };
     }
 
