@@ -103,6 +103,15 @@ function makeTicker(overrides: Partial<TickerRecord["metadata"]> = {}): TickerRe
 }
 
 describe("CLI watchlist commands", () => {
+  test("help lists the prediction markets launcher", async () => {
+    const { result, stdout } = await captureConsole(() => runCli(["help"]));
+
+    expect(result).toBe(true);
+    expect(stdout).toContain("predictions [...]");
+    expect(stdout).toContain("Prediction Launch");
+    expect(stdout).toContain("gloomberb predictions world");
+  });
+
   test("creates a watchlist and persists the generated id", async () => {
     const { dataDir } = await createCliFixture({ watchlists: [] });
 

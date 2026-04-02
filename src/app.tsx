@@ -63,6 +63,12 @@ import { comparisonChartPlugin } from "./plugins/builtin/comparison-chart";
 import { debugPlugin } from "./plugins/builtin/debug";
 import { layoutManagerPlugin, setLayoutManagerDispatch } from "./plugins/builtin/layout-manager";
 import { yahooPlugin } from "./plugins/builtin/yahoo";
+import { predictionMarketsPlugin } from "./plugins/prediction-markets";
+import {
+  applyPredictionLaunchIntentToConfig,
+  applyPredictionLaunchIntentToSessionSnapshot,
+  type PredictionLaunchIntent,
+} from "./plugins/prediction-markets/launch";
 import { saveConfig } from "./data/config-store";
 import { Toaster, toast } from "@opentui-ui/toast/react";
 import { canSelfUpdate, checkForUpdate, performUpdate } from "./updater";
@@ -1343,10 +1349,26 @@ interface AppProps {
   config: AppConfig;
   renderer: CliRenderer;
   externalPlugins?: import("./plugins/loader").LoadedExternalPlugin[];
+  predictionLaunchIntent?: PredictionLaunchIntent | null;
 }
 
-export function App({ config: initialConfig, renderer, externalPlugins = [] }: AppProps) {
-  const [config, setConfig] = useState(initialConfig);
+export function App({
+  config: initialConfig,
+  renderer,
+  externalPlugins = [],
+  predictionLaunchIntent = null,
+}: AppProps) {
+  const applyPredictionLaunch = useCallback((configValue: AppConfig) => {
+    if (!predictionLaunchIntent) return configValue;
+    return applyPredictionLaunchIntentToConfig(configValue, predictionLaunchIntent, {
+      width: Math.max(renderer.terminalWidth, 120),
+      height: Math.max(renderer.terminalHeight, 40),
+    }).config;
+  }, [predictionLaunchIntent, renderer.terminalHeight, renderer.terminalWidth]);
+
+  const [config, setConfig] = useState(() => {
+    return applyPredictionLaunch(initialConfig);
+  });
   const [showOnboarding, setShowOnboarding] = useState(!initialConfig.onboardingComplete);
 
   useEffect(() => bindAppActivity(renderer), [renderer]);
@@ -1380,6 +1402,7 @@ export function App({ config: initialConfig, renderer, externalPlugins = [] }: A
     pluginRegistry.register(aiPlugin);
     pluginRegistry.register(helpPlugin);
     pluginRegistry.register(comparisonChartPlugin);
+    pluginRegistry.register(predictionMarketsPlugin);
     pluginRegistry.register(debugPlugin);
 
     for (const { plugin, error } of externalPlugins) {
@@ -1409,8 +1432,21 @@ export function App({ config: initialConfig, renderer, externalPlugins = [] }: A
 
   const sessionSnapshot = useMemo(() => {
     const persisted = services.persistence.sessions.get<AppSessionSnapshot>(APP_SESSION_ID, APP_SESSION_SCHEMA_VERSION)?.value ?? null;
-    return reconcileAppSessionSnapshot(config, persisted);
-  }, [config, services.persistence.sessions]);
+    const reconciled = reconcileAppSessionSnapshot(config, persisted);
+    if (!predictionLaunchIntent) {
+      return reconciled;
+    }
+    const paneInstanceId = config.layout.instances.find((instance) => instance.paneId === "prediction-markets")?.instanceId;
+    if (!paneInstanceId) {
+      return reconciled;
+    }
+    return applyPredictionLaunchIntentToSessionSnapshot(
+      config,
+      reconciled,
+      paneInstanceId,
+      predictionLaunchIntent,
+    );
+  }, [config, predictionLaunchIntent, services.persistence.sessions]);
 
   if (showOnboarding) {
     return (
@@ -1418,7 +1454,7 @@ export function App({ config: initialConfig, renderer, externalPlugins = [] }: A
         config={config}
         pluginRegistry={services.pluginRegistry}
         onComplete={(updatedConfig) => {
-          setConfig(updatedConfig);
+          setConfig(applyPredictionLaunch(updatedConfig));
           setShowOnboarding(false);
         }}
       />

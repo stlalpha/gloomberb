@@ -1,0 +1,311 @@
+import { colors } from "../../theme/colors";
+import { formatCompact, formatNumber, formatTimeAgo } from "../../utils/format";
+import type {
+  PredictionBrowseTab,
+  PredictionCategoryId,
+  PredictionColumnDef,
+  PredictionListRow,
+  PredictionSortPreference,
+  PredictionVenueScope,
+  PredictionVolumeUnit,
+} from "./types";
+import { matchesPredictionCategory } from "./categories";
+
+const TEXT_SORT_COLUMNS = new Set([
+  "market",
+  "target",
+  "venue",
+  "event",
+  "category",
+  "status",
+  "market_id",
+]);
+
+function coerceDateValue(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const next = new Date(value).getTime();
+  return Number.isFinite(next) ? next : null;
+}
+
+function formatCompactSigned(
+  value: number | null,
+  unit: PredictionVolumeUnit,
+): string {
+  if (value == null) return "—";
+  if (unit === "usd") return `$${formatCompact(value)}`;
+  return `${formatCompact(value)} ct`;
+}
+
+export function formatPredictionProbability(
+  value: number | null | undefined,
+): string {
+  if (value == null) return "—";
+  const cents = value * 100;
+  if (Math.abs(cents) >= 100 || Math.abs(cents % 1) < 0.05) {
+    return `${formatNumber(cents, 0)}c`;
+  }
+  return `${formatNumber(cents, 1)}c`;
+}
+
+export function formatPredictionPercent(
+  value: number | null | undefined,
+): string {
+  if (value == null) return "—";
+  const percent = value * 100;
+  if (Math.abs(percent) >= 10 || Math.abs(percent % 1) < 0.05) {
+    return `${formatNumber(percent, 0)}%`;
+  }
+  return `${formatNumber(percent, 1)}%`;
+}
+
+export function getPredictionProbabilityColor(
+  value: number | null | undefined,
+): string | undefined {
+  if (value == null) return undefined;
+  if (Math.abs(value - 0.5) < 0.005) return colors.neutral;
+  return value > 0.5 ? colors.positive : colors.negative;
+}
+
+export function formatPredictionSpread(
+  value: number | null | undefined,
+): string {
+  if (value == null) return "—";
+  return `${formatNumber(value * 100, value * 100 >= 10 ? 0 : 1)}c`;
+}
+
+export function formatPredictionMetric(
+  value: number | null | undefined,
+  unit: PredictionVolumeUnit,
+): string {
+  return formatCompactSigned(value ?? null, unit);
+}
+
+export function formatPredictionEndsAt(
+  value: string | null | undefined,
+): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "—";
+  const delta = date.getTime() - Date.now();
+  if (Math.abs(delta) < 24 * 60 * 60_000) {
+    const absMinutes = Math.round(Math.abs(delta) / 60_000);
+    if (absMinutes < 60)
+      return delta >= 0 ? `${absMinutes}m left` : `${absMinutes}m ago`;
+    const hours = Math.floor(absMinutes / 60);
+    const minutes = absMinutes % 60;
+    return delta >= 0 ? `${hours}h ${minutes}m` : `${hours}h ago`;
+  }
+  return date.toLocaleString("en-US", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+export function formatPredictionUpdatedAt(
+  value: string | null | undefined,
+): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "—";
+  return formatTimeAgo(date);
+}
+
+function getMarketSortValue(
+  row: PredictionListRow,
+  columnId: string,
+): string | number | null {
+  switch (columnId) {
+    case "market":
+      return row.title.toLowerCase();
+    case "target":
+      return row.focusMarketLabel.toLowerCase();
+    case "venue":
+      return row.venue;
+    case "yes":
+      return row.focusYesPrice;
+    case "spread":
+      return row.spread;
+    case "vol_24h":
+      return row.volume24h;
+    case "vol_total":
+      return row.totalVolume;
+    case "open_interest":
+      return row.openInterest;
+    case "liquidity":
+      return row.liquidity;
+    case "ends":
+      return coerceDateValue(row.endsAt);
+    case "updated":
+      return coerceDateValue(row.updatedAt);
+    case "status":
+      return row.status;
+    case "event":
+      return row.eventLabel.toLowerCase();
+    case "category":
+      return (row.category ?? "").toLowerCase();
+    case "market_id":
+      return row.marketId;
+    default:
+      return null;
+  }
+}
+
+export function getDefaultPredictionSort(
+  browseTab: PredictionBrowseTab,
+): PredictionSortPreference {
+  switch (browseTab) {
+    case "ending":
+      return { columnId: "ends", direction: "asc" };
+    case "new":
+      return { columnId: "updated", direction: "desc" };
+    default:
+      return { columnId: "vol_24h", direction: "desc" };
+  }
+}
+
+export function getNextPredictionSort(
+  current: PredictionSortPreference,
+  columnId: string,
+): PredictionSortPreference {
+  if (current.columnId !== columnId) {
+    if (columnId === "ends") return { columnId, direction: "asc" };
+    if (TEXT_SORT_COLUMNS.has(columnId)) return { columnId, direction: "asc" };
+    return { columnId, direction: "desc" };
+  }
+  if (current.direction === "desc") return { columnId, direction: "asc" };
+  return { columnId: null, direction: "desc" };
+}
+
+export function filterPredictionMarkets(
+  markets: PredictionListRow[],
+  browseTab: PredictionBrowseTab,
+  venueScope: PredictionVenueScope,
+  categoryId: PredictionCategoryId,
+  searchQuery: string,
+  watchlist: Set<string>,
+): PredictionListRow[] {
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  return markets.filter((market) => {
+    if (venueScope !== "all" && market.venue !== venueScope) return false;
+    if (!matchesPredictionCategory(market, categoryId)) return false;
+    if (
+      browseTab === "watchlist" &&
+      !market.watchMarketKeys.some((marketKey) => watchlist.has(marketKey))
+    ) {
+      return false;
+    }
+    if (!normalizedQuery) return true;
+    return market.searchText.includes(normalizedQuery);
+  });
+}
+
+export function sortPredictionMarkets(
+  markets: PredictionListRow[],
+  sortPreference: PredictionSortPreference,
+): PredictionListRow[] {
+  if (!sortPreference.columnId) return [...markets];
+
+  return [...markets].sort((left, right) => {
+    const leftValue = getMarketSortValue(left, sortPreference.columnId!);
+    const rightValue = getMarketSortValue(right, sortPreference.columnId!);
+
+    if (leftValue == null && rightValue == null) return 0;
+    if (leftValue == null) return 1;
+    if (rightValue == null) return -1;
+
+    const comparison =
+      typeof leftValue === "string" && typeof rightValue === "string"
+        ? leftValue.localeCompare(rightValue)
+        : Number(leftValue) - Number(rightValue);
+
+    return sortPreference.direction === "asc" ? comparison : -comparison;
+  });
+}
+
+export function getPredictionColumnValue(
+  column: PredictionColumnDef,
+  market: PredictionListRow,
+  watchlisted: boolean,
+): { text: string; color?: string } {
+  switch (column.id) {
+    case "watch":
+      return {
+        text: watchlisted ? "★" : "·",
+        color: watchlisted ? colors.positive : colors.textDim,
+      };
+    case "market":
+      return {
+        text:
+          market.kind === "group"
+            ? `${market.title} · ${market.marketCount} targets`
+            : market.title,
+      };
+    case "target":
+      return { text: market.focusMarketLabel };
+    case "venue":
+      return { text: market.venue === "polymarket" ? "Polymkt" : "Kalshi" };
+    case "yes":
+      return {
+        text:
+          market.kind === "group"
+            ? `${formatPredictionPercent(market.focusYesPrice)} ${market.focusMarketLabel}`
+            : formatPredictionPercent(market.focusYesPrice),
+        color: getPredictionProbabilityColor(market.focusYesPrice),
+      };
+    case "spread":
+      return {
+        text:
+          market.kind === "group"
+            ? formatPredictionSpread(market.representative.spread)
+            : formatPredictionSpread(market.spread),
+      };
+    case "vol_24h":
+      return {
+        text: formatPredictionMetric(market.volume24h, market.volume24hUnit),
+      };
+    case "open_interest":
+      return {
+        text: formatPredictionMetric(
+          market.openInterest,
+          market.openInterestUnit,
+        ),
+      };
+    case "ends":
+      return { text: formatPredictionEndsAt(market.endsAt) };
+    case "status":
+      return {
+        text: market.status.toUpperCase(),
+        color:
+          market.status === "open"
+            ? colors.positive
+            : market.status === "closed"
+              ? colors.negative
+              : colors.textDim,
+      };
+    case "event":
+      return { text: market.eventLabel };
+    case "category":
+      return { text: market.category ?? "—" };
+    case "vol_total":
+      return {
+        text: formatPredictionMetric(
+          market.totalVolume,
+          market.totalVolumeUnit,
+        ),
+      };
+    case "liquidity":
+      return {
+        text: formatPredictionMetric(market.liquidity, market.liquidityUnit),
+      };
+    case "updated":
+      return { text: formatPredictionUpdatedAt(market.updatedAt) };
+    case "market_id":
+      return { text: market.marketId };
+    default:
+      return { text: "—" };
+  }
+}

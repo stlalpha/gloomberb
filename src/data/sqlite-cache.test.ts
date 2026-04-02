@@ -78,6 +78,20 @@ describe("AppPersistence", () => {
     persistence.close();
   });
 
+  test("returns stable references for unchanged plugin state snapshots", () => {
+    const dbPath = createTempDbPath("plugin-stable-snapshot");
+    const persistence = new AppPersistence(dbPath);
+    persistence.pluginState.set("prediction-markets", "resume:watchlist:v1", ["kalshi:ABC"], 1);
+
+    const first = persistence.pluginState.get<string[]>("prediction-markets", "resume:watchlist:v1", 1);
+    const second = persistence.pluginState.get<string[]>("prediction-markets", "resume:watchlist:v1", 1);
+
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(second?.value).toBe(first?.value);
+    persistence.close();
+  });
+
   test("stores and returns session snapshots", () => {
     const dbPath = createTempDbPath("session-snapshot");
     const persistence = new AppPersistence(dbPath);

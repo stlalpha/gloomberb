@@ -9,8 +9,15 @@ export interface PluginStateRecord<T = unknown> {
   updatedAt: number;
 }
 
+interface CachedPluginStateRecord {
+  value: unknown;
+  schemaVersion: number;
+  updatedAt: number;
+  rawValue: string;
+}
+
 export class PluginStateStore {
-  private readonly cache = new Map<string, PluginStateRecord<unknown>>();
+  private readonly cache = new Map<string, CachedPluginStateRecord>();
 
   constructor(private readonly db: Database) {}
 
@@ -32,7 +39,7 @@ export class PluginStateStore {
     }
 
     const cached = this.cache.get(cacheKey);
-    if (cached && cached.schemaVersion === row.schema_version && cached.updatedAt === row.updated_at) {
+    if (cached && cached.schemaVersion === row.schema_version && cached.updatedAt === row.updated_at && cached.rawValue === row.value) {
       return cached as PluginStateRecord<T>;
     }
 
@@ -42,33 +49,37 @@ export class PluginStateStore {
       this.delete(pluginId, key);
       return null;
     }
-    const record: PluginStateRecord<T> = {
+
+    const record: CachedPluginStateRecord = {
       value,
       schemaVersion: row.schema_version,
       updatedAt: row.updated_at,
+      rawValue: row.value,
     };
     this.cache.set(cacheKey, record);
-    return record;
+    return record as PluginStateRecord<T>;
   }
 
   set(pluginId: string, key: string, value: unknown, schemaVersion = DEFAULT_PLUGIN_STATE_SCHEMA_VERSION): void {
+    const rawValue = serializeJson(value);
     const updatedAt = Date.now();
     this.db
       .query(
         `INSERT OR REPLACE INTO plugin_state (plugin_id, key, schema_version, value, updated_at)
          VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(pluginId, key, schemaVersion, serializeJson(value), updatedAt);
+      .run(pluginId, key, schemaVersion, rawValue, updatedAt);
     this.cache.set(`${pluginId}:${key}`, {
       value,
       schemaVersion,
       updatedAt,
+      rawValue,
     });
   }
 
   delete(pluginId: string, key: string): void {
-    this.cache.delete(`${pluginId}:${key}`);
     this.db.query("DELETE FROM plugin_state WHERE plugin_id = ? AND key = ?").run(pluginId, key);
+    this.cache.delete(`${pluginId}:${key}`);
   }
 
   keys(pluginId: string): string[] {
@@ -81,11 +92,11 @@ export class PluginStateStore {
   }
 
   clear(pluginId: string): void {
+    this.db.query("DELETE FROM plugin_state WHERE plugin_id = ?").run(pluginId);
     for (const cacheKey of this.cache.keys()) {
       if (cacheKey.startsWith(`${pluginId}:`)) {
         this.cache.delete(cacheKey);
       }
     }
-    this.db.query("DELETE FROM plugin_state WHERE plugin_id = ?").run(pluginId);
   }
 }

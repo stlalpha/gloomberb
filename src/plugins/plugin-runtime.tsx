@@ -111,12 +111,16 @@ export function usePluginPaneState<T>(key: string, fallback: T, paneId?: string)
       ? (nextValue as (previousValue: T) => T)(currentValue)
       : nextValue;
 
+    if (Object.is(resolved, currentValue)) {
+      return;
+    }
+
     dispatch({
-      type: "UPDATE_PANE_STATE",
+      type: "UPDATE_PLUGIN_PANE_STATE",
       paneId: scopedPaneId,
-      patch: {
-        pluginState: setPluginPaneStateValue(currentPaneState, pluginId, key, resolved),
-      },
+      pluginId,
+      key,
+      value: resolved,
     });
   }, [dispatch, fallback, key, pluginId, scopedPaneId, state.paneState]);
 
@@ -142,6 +146,9 @@ export function usePluginState<T>(key: string, fallback: T, options?: { schemaVe
     const resolved = typeof nextValue === "function"
       ? (nextValue as (previousValue: T) => T)(currentValue)
       : nextValue;
+    if (Object.is(resolved, currentValue)) {
+      return;
+    }
     runtime.setResumeState(pluginId, key, resolved, schemaVersion);
   }, [fallback, key, pluginId, runtime, schemaVersion]);
 
@@ -158,6 +165,9 @@ export function usePluginConfigState<T>(key: string, fallback: T): [T, (value: S
     const resolved = typeof nextValue === "function"
       ? (nextValue as (previousValue: T) => T)(currentValue)
       : nextValue;
+    if (Object.is(resolved, currentValue)) {
+      return;
+    }
     void runtime.setConfigState(pluginId, key, resolved);
   }, [fallback, key, pluginId, runtime, state.config.pluginConfig]);
 

@@ -30,6 +30,7 @@ function help() {
     ],
     [
       ["(no command)", "Launch the terminal UI"],
+      ["predictions [...]", "Launch the UI with Prediction Markets focused"],
       ["help", "Show this help message"],
       ["portfolio [name]", "List collections or show a portfolio/watchlist"],
       ["watchlist [action]", "List, create, delete, add, or remove watchlists"],
@@ -39,6 +40,20 @@ function help() {
       ["remove <name>", "Remove an installed plugin"],
       ["update [name]", "Update plugins"],
       ["plugins", "List installed plugins"],
+    ],
+  ));
+  console.log("");
+  console.log(renderSection("Prediction Launch"));
+  console.log(renderTable(
+    [
+      { header: "Input" },
+      { header: "Example" },
+    ],
+    [
+      ["gloomberb predictions [venue] [category] [browse-tab] [search...]", "gloomberb predictions world"],
+      ["venue", "all | polymarket | kalshi"],
+      ["category", "all | politics | world | macro | crypto | science | sports | entertainment | climate | social"],
+      ["browse-tab", "top | ending | new | watchlist"],
     ],
   ));
   console.log("");
