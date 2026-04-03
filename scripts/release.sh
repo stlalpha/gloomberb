@@ -16,7 +16,7 @@ Style rules for the release title and notes:
 
 Steps:
 1. Run ./scripts/bump-version.sh <version> to bump, commit, tag, and push
-2. Create the GitHub release with gh release create --draft using a short title and clean markdown release notes referencing PR numbers
+2. Create the GitHub release using a short title and clean markdown release notes referencing PR numbers. IMPORTANT: Always pass --draft to gh release create so it is not published immediately.
 EOF
 )
 

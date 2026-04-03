@@ -21,7 +21,7 @@ async function build(os: string, arch: string) {
   console.log(`Building ${target}...`);
   const proc = Bun.spawn(
     ["bun", "build", "--compile", `--target=${target}`, "src/index.tsx", `--outfile=${outfile}`],
-    { cwd: rootDir, stdout: "inherit", stderr: "inherit" },
+    { cwd: rootDir, stdout: "inherit", stderr: "inherit", env: { ...process.env, GLOOMBERB_API_URL: "https://api.gloom.sh" } },
   );
   const code = await proc.exited;
   if (code !== 0) {
