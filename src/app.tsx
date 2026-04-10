@@ -1072,6 +1072,90 @@ function AppInner({ pluginRegistry, tickerRepository, dataProvider, marketData, 
     activatePane(instance.instanceId, nextLayout);
   };
 
+  pluginRegistry.navigateTickerFn = (rawSymbol) => {
+    (async () => {
+      try {
+      // Resolve or create the ticker in the local database
+      const resolved = await resolveTickerSearch({
+        query: rawSymbol,
+        activeTicker: null,
+        tickers: stateRef.current.tickers,
+        dataProvider,
+      });
+
+      let symbol = rawSymbol;
+      if (resolved?.kind === "local") {
+        symbol = resolved.symbol;
+      } else if (resolved?.kind === "provider" && resolved.result) {
+        const { ticker, created } = await upsertTickerFromSearchResult(tickerRepository, resolved.result);
+        symbol = ticker.metadata.ticker;
+        dispatch({ type: "UPDATE_TICKER", ticker });
+        if (created) {
+          pluginRegistry.events.emit("ticker:added", { symbol, ticker });
+        }
+      }
+
+      // Active panel resolution — navigate the focused or linked detail pane:
+      // 1. If the focused pane IS a ticker-detail, retarget it directly
+      // 2. If a ticker-detail follows the focused pane, retarget that
+      // 3. Any follow-mode ticker-detail in the layout
+      // 4. Any ticker-detail in the layout
+      // 5. Fall back to pinning a new pane
+      const currentState = stateRef.current;
+      const currentLayout = currentState.config.layout;
+      const focused = currentState.focusedPaneId;
+
+      const focusedInstance = focused
+        ? findPaneInstance(currentLayout, focused)
+        : null;
+
+      const detailPane =
+        (focusedInstance?.paneId === "ticker-detail" && isPaneInLayout(currentLayout, focusedInstance.instanceId)
+          ? focusedInstance
+          : null)
+        ?? currentLayout.instances.find((inst) =>
+          inst.paneId === "ticker-detail"
+          && inst.binding?.kind === "follow"
+          && inst.binding.sourceInstanceId === focused
+          && isPaneInLayout(currentLayout, inst.instanceId),
+        )
+        ?? currentLayout.instances.find((inst) =>
+          inst.paneId === "ticker-detail"
+          && inst.binding?.kind === "follow"
+          && isPaneInLayout(currentLayout, inst.instanceId),
+        )
+        ?? currentLayout.instances.find((inst) =>
+          inst.paneId === "ticker-detail"
+          && isPaneInLayout(currentLayout, inst.instanceId),
+        );
+
+      if (detailPane) {
+        if (detailPane.binding?.kind === "follow") {
+          const sourceId = detailPane.binding.sourceInstanceId;
+          dispatch({ type: "UPDATE_PANE_STATE", paneId: sourceId, patch: { cursorSymbol: symbol } });
+          activatePane(detailPane.instanceId, currentLayout);
+        } else {
+          const nextLayout = {
+            ...currentLayout,
+            instances: currentLayout.instances.map((instance) => (
+              instance.instanceId === detailPane.instanceId
+                ? { ...instance, title: symbol, binding: { kind: "fixed" as const, symbol } }
+                : instance
+            )),
+          };
+          persistLayout(nextLayout);
+          activatePane(detailPane.instanceId, nextLayout);
+        }
+      } else {
+        pluginRegistry.pinTickerFn(symbol, { floating: false });
+      }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        pluginRegistry.notify({ body: `Failed to navigate to ${rawSymbol}: ${message}`, type: "error" });
+      }
+    })();
+  };
+
   setLayoutManagerDispatch(dispatch, () => ({
     layout: state.config.layout,
     termWidth: pluginRegistry.getTermSizeFn().width,
