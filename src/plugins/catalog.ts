@@ -16,6 +16,10 @@ import { debugPlugin } from "./builtin/debug";
 import { layoutManagerPlugin } from "./builtin/layout-manager";
 import { yahooPlugin } from "./builtin/yahoo";
 import { predictionMarketsPlugin } from "./prediction-markets";
+import { fxMatrixPlugin } from "./builtin/fx-matrix";
+import { yieldCurvePlugin } from "./builtin/yield-curve";
+import { sectorsPlugin } from "./builtin/sectors";
+import { earningsPlugin } from "./builtin/earnings";
 
 export interface PluginCatalogEntry {
   plugin: GloomPlugin;
@@ -40,6 +44,10 @@ export const builtinPlugins: GloomPlugin[] = [
   helpPlugin,
   comparisonChartPlugin,
   predictionMarketsPlugin,
+  fxMatrixPlugin,
+  yieldCurvePlugin,
+  sectorsPlugin,
+  earningsPlugin,
   debugPlugin,
 ];
 
