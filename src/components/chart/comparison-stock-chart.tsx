@@ -7,7 +7,7 @@ import { useAppState, usePaneSettingValue } from "../../state/app-context";
 import { blendHex, colors, getComparisonSeriesColor, priceColor } from "../../theme/colors";
 import type { BrokerContractRef } from "../../types/instrument";
 import type { PricePoint } from "../../types/financials";
-import { formatPercentRaw } from "../../utils/format";
+import { formatCurrency, formatPercentRaw } from "../../utils/format";
 import { formatMarketPriceWithCurrency, formatSignedMarketPrice } from "../../utils/market-format";
 import { getSharedDataProvider } from "../../plugins/registry";
 import {
