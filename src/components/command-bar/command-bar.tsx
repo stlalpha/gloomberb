@@ -501,7 +501,7 @@ export function CommandBar({
       options.push({
         label: "Create Manual Portfolio",
         value: "manual",
-        description: "Add securities and positions by hand",
+        description: "Add tickers and positions by hand",
       });
     }
     options.push(...brokerChoices.map((choice) => ({
@@ -1982,9 +1982,7 @@ export function CommandBar({
     const pluginId = pluginRegistry.getPaneTemplatePluginId(template.id);
     const pluginName = pluginId ? pluginRegistry.allPlugins.get(pluginId)?.name : null;
     const displayLabel = getPaneTemplateDisplayLabel(template);
-    const argDisplay = template.shortcut?.argPlaceholder === "ticker" ? "security"
-      : template.shortcut?.argPlaceholder === "tickers" ? "securities"
-      : template.shortcut?.argPlaceholder;
+    const argDisplay = template.shortcut?.argPlaceholder;
     const shortcutLabel = template.shortcut
       ? [template.shortcut.prefix, argDisplay && `<${argDisplay}>`]
         .filter(Boolean)
@@ -2222,7 +2220,7 @@ export function CommandBar({
           confirmId: "reset-all-data",
           title: "Reset All Data",
           body: [
-            "This will permanently delete all portfolios, securities, notes, broker credentials, and settings.",
+            "This will permanently delete all portfolios, tickers, notes, broker credentials, and settings.",
             "Gloomberb will quit and show the setup wizard on next launch.",
           ],
           confirmLabel: "Reset Everything",
@@ -2641,7 +2639,7 @@ export function CommandBar({
             ? `${action === "add" ? "Target" : "Current"} "${preferredTargetName}"`
             : displayTicker
               ? `Choose a ${displayName.toLowerCase()}`
-              : "Choose a security",
+              : "Choose a ticker",
           category: command.category,
           kind: "command",
           right: command.prefix,
@@ -2988,7 +2986,7 @@ export function CommandBar({
       if (!match.arg && !shortcutItem) {
         items.push({
           id: "search-hint",
-          label: "Enter a symbol or name",
+          label: "Type a ticker symbol",
           detail: "Search Yahoo Finance and connected brokers",
           category: "Search",
           kind: "info",
@@ -3017,7 +3015,7 @@ export function CommandBar({
       }
       items.push(...recentTickers.map((ticker) => ({
         ...mapTickerSearchCandidateToResultItem(createLocalTickerSearchCandidates([ticker])[0]!),
-        category: "Recent",
+        category: "Tickers",
       })));
       items.push(...paneShortcutItems());
       for (const command of commands) {
@@ -3027,7 +3025,7 @@ export function CommandBar({
       items.push(...tickerActionItems());
       items.push(...pluginCommandItems());
     } else {
-      const tickerItems = localTickerSearchResultItems(undefined, { category: "Recent" });
+      const tickerItems = localTickerSearchResultItems(undefined, { category: "Tickers" });
       const commandItems = commands
         .map((command) => commandToItem(command))
         .filter((item): item is ResultItem => item !== null);
@@ -3210,7 +3208,7 @@ export function CommandBar({
             ? `Shortcut: ${rootShortcutIntent.label} for ${symbol} · Tab to accept`
             : `Shortcut: ${rootShortcutIntent.label} for ${symbol}`;
         }
-        return `Shortcut: ${rootShortcutIntent.label} · Enter to choose security`;
+        return `Shortcut: ${rootShortcutIntent.label} · Enter to choose ticker`;
       }
       if (argKind === "ticker-list") {
         if (rootShortcutIntent.argText) {
@@ -3220,7 +3218,7 @@ export function CommandBar({
         if (inferred) {
           return `Shortcut: ${rootShortcutIntent.label} · inferred ${inferred} · Tab to accept`;
         }
-        return `Shortcut: ${rootShortcutIntent.label} · Enter securities to compare`;
+        return `Shortcut: ${rootShortcutIntent.label} · Enter tickers to compare`;
       }
       return `Shortcut: ${rootShortcutIntent.label}`;
     }
@@ -3236,7 +3234,7 @@ export function CommandBar({
           ? `Shortcut: Open ${symbol} · Tab to accept`
           : `Shortcut: Open ${symbol}`;
       }
-      return "Shortcut: Security Lookup";
+      return "Shortcut: Search Ticker";
     }
 
     if (isCollectionCommand(rootShortcutIntent.command.id)) {
@@ -3371,7 +3369,7 @@ export function CommandBar({
         }
         return {
           id: "search-ticker-route",
-          label: "Security Lookup",
+          label: "Search Ticker",
           detail: "Search Yahoo Finance and connected brokers",
           category: "Search",
           kind: "command",
@@ -3381,7 +3379,7 @@ export function CommandBar({
       return {
         id: `search-ticker:${match.arg}`,
         label: `Open ${match.arg.toUpperCase()}`,
-        detail: "Resolve the security exactly or open inline search",
+        detail: "Resolve the ticker exactly or open inline search",
         category: "Search",
         kind: "command",
         right: match.command.prefix,
@@ -3434,7 +3432,7 @@ export function CommandBar({
         label: displayTicker
           ? `${getCollectionCommandVerb(getCollectionCommandAction(commandId))} ${displayTicker}`
           : match.command.label,
-        detail: displayTicker ? "Resolve the security and apply it inline" : "Choose a security",
+        detail: displayTicker ? "Resolve the ticker and apply it inline" : "Choose a ticker",
         category: match.command.category,
         kind: "command",
         right: match.command.prefix,
@@ -3853,7 +3851,7 @@ export function CommandBar({
           const emptyState = getEmptyState("search", currentRoute.query, currentRoute.query);
           return {
             kind: "mode",
-            title: "Security Lookup",
+            title: "Search Ticker",
             subtitle: "Search Yahoo Finance and connected brokers.",
             query: currentRoute.query,
             selectedIdx: currentRoute.selectedIdx,
@@ -5164,7 +5162,7 @@ export function CommandBar({
                   : currentRoute.screen === "plugins" ? "Manage Plugins"
                     : currentRoute.screen === "layout" ? "Layout Actions"
                       : currentRoute.screen === "new-pane" ? "New Pane"
-                        : "Security Lookup"
+                        : "Search Ticker"
                 : currentRoute?.kind === "picker" ? currentRoute.title
                   : currentRoute?.kind === "pane-settings" ? "Pane Settings"
                     : currentRoute?.kind === "workflow" ? currentRoute.title
@@ -5239,19 +5237,7 @@ export function CommandBar({
           ) : <box height={1} />;
         })()}
 
-        {/* Footer hints */}
-        <box height={1} paddingX={contentPadding} flexDirection="row">
-          <box flexGrow={1}>
-            <text fg={paletteSubtleText}>
-              {visibleListState?.footerLeft || ""}
-            </text>
-          </box>
-          <box>
-            <text fg={paletteSubtleText}>
-              {visibleListState?.footerRight || ""}
-            </text>
-          </box>
-        </box>
+        <box height={1} />
       </box>
     </box>
   );

@@ -43,7 +43,7 @@ describe("command bar view model helpers", () => {
 
   test("returns specific empty states", () => {
     expect(getEmptyState("search", "T ", "")).toEqual({
-      label: "Enter a symbol or name",
+      label: "Type a ticker symbol",
       detail: "Search Yahoo Finance and connected brokers",
     });
     expect(getEmptyState("search", "T zom", "zom")).toEqual({
@@ -52,7 +52,7 @@ describe("command bar view model helpers", () => {
     });
     expect(getEmptyState("default", "abc")).toEqual({
       label: 'No matches for "abc"',
-      detail: "Try a symbol, command, or function code",
+      detail: "Try a ticker, command name, or prefix",
     });
     expect(getEmptyState("layout", "LAY ")).toEqual({
       label: "No layout actions match",

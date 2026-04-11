@@ -510,7 +510,7 @@ describe("CommandBar", () => {
     let frame = testSetup.captureCharFrame();
     expect(frame).toContain("SEARCH");
     expect(frame).toContain("T");
-    expect(frame).toContain("Enter a symbol or name");
+    expect(frame).toContain("Type a ticker symbol");
     expect(frame).not.toContain("Back");
   });
 
@@ -531,7 +531,7 @@ describe("CommandBar", () => {
 
     const frame = testSetup.captureCharFrame();
     expect(frame).toContain("Back");
-    expect(frame).toContain("Security Lookup");
+    expect(frame).toContain("Search Ticker");
   });
 
   test("QQ with an active ticker shows ghost completion and tab inserts the symbol", async () => {
@@ -1688,7 +1688,7 @@ describe("CommandBar", () => {
 
     const frame = testSetup.captureCharFrame();
     expect(frame).toContain("Comparison Chart");
-    expect(frame).toContain("Securities");
+    expect(frame).toContain("Tickers");
     expect(frame).toContain("AAPL,");
   });
 

@@ -6,24 +6,24 @@ exports[`CommandBar renders the default layout with opencode-style chrome 1`] = 
                 BROWSE                                                          
                 Symbol, command, or shortcut...                                 
                                                                                 
-                Recent                                                          
-                › AAPL                                  NASDAQ                  
-                  MSFT                                  NASDAQ                  
+                Tickers                                                         
+                › AAPL                          NASDAQ                          
+                  MSFT                          NASDAQ                          
                                                                                 
                 Panes                                                           
-                  PF                                    Portf...                
-                  CHAT                                  Chat                    
-                  QQ                                    Quote...                
+                  PF                            Portfolio                       
+                  CHAT                          Chat                            
+                  QQ                            Quote Monitor                   
                                                                                 
                 Search                                                          
-                  Security Lookup                       T                       
+                  Search Ticker                 T                               
                                                                                 
                 Navigation                                                      
-                  Help                                  HELP                    
+                  Help                          HELP                            
                                                                                 
                                                                                 
                 Apple Inc.                                                      
-                up/down move  enter select             esc close                
+                                                                                
                                                                                 
 "
 `;
@@ -35,7 +35,7 @@ exports[`CommandBar renders theme prefix results in the root query 1`] = `
                 TH                                                              
                                                                                 
                 Themes                                                          
-                › Amber                                 current                 
+                › Amber                         current                         
                   Green Phosphor                                                
                   Cyan                                                          
                   Red Phosphor                                                  
@@ -51,7 +51,7 @@ exports[`CommandBar renders theme prefix results in the root query 1`] = `
                   Catppuccin Mocha                                              
                                                                                 
                 Classic amber-on-black terminal                                 
-                up/down move  enter select             esc close                
+                                                                                
                                                                                 
 "
 `;
@@ -63,8 +63,8 @@ exports[`CommandBar renders plugin toggle state 1`] = `
                 PL                                                              
                                                                                 
                 Plugins                                                         
-                › News                                  on                      
-                  Notes                                 off                     
+                › News                          on                              
+                  Notes                         off                             
                                                                                 
                                                                                 
                                                                                 
@@ -79,7 +79,7 @@ exports[`CommandBar renders plugin toggle state 1`] = `
                                                                                 
                                                                                 
                 Latest headlines                                                
-                up/down move  enter select             esc close                
+                                                                                
                                                                                 
 "
 `;
@@ -90,20 +90,20 @@ exports[`CommandBar collapses the trailing column on narrow terminals 1`] = `
        BROWSE                             
        Symbol, command, or shortcut...    
                                           
-       Recent                             
-       › AAPL                      NASDAQ 
-         MSFT                      NASDAQ 
+       Tickers                            
+       › AAPL                  NASDAQ     
+         MSFT                  NASDAQ     
                                           
        Panes                              
-         PF                        Portf..
-         CHAT                      Chat   
-         QQ                        Quote..
+         PF                    Portfolio  
+         CHAT                  Chat       
+         QQ                    Quote Mon..
                                           
        Search                             
-         Security Lookup           T      
+         Search Ticker         T          
                                           
        Apple Inc.                         
-       up/down move  enter select esc clos
+                                          
                                           
 "
 `;
@@ -115,12 +115,12 @@ exports[`CommandBar groups ticker search sections and keeps saved matches above 
                 T appl                                                          
                 Shortcut: Open APPL                                             
                 Saved                                                           
-                › AAPL                                  NASDAQ                  
+                › AAPL                          NASDAQ                          
                                                                                 
                 Other Listings                                                  
-                  APP                                   NASDAQ                  
-                  AMAT                                  NASDAQ                  
-                  AAOI                                  NASDAQ                  
+                  APP                           NASDAQ                          
+                  AMAT                          NASDAQ                          
+                  AAOI                          NASDAQ                          
                                                                                 
                                                                                 
                                                                                 
@@ -131,7 +131,7 @@ exports[`CommandBar groups ticker search sections and keeps saved matches above 
                                                                                 
                                                                                 
                 Apple Inc.                                                      
-                up/down move  enter select             esc close                
+                                                                                
                                                                                 
 "
 `;

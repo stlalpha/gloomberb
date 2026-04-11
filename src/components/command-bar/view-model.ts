@@ -48,7 +48,7 @@ export function resolveCommandBarMode(query: string): CommandBarModeInfo {
 
   switch (match.command.id) {
     case "search-ticker":
-      return { kind: "search", badge: "SEARCH", hint: "Search for securities by symbol or name" };
+      return { kind: "search", badge: "SEARCH", hint: "Search Yahoo Finance and broker-backed symbols" };
     case "theme":
       return { kind: "themes", badge: "THEMES", hint: "Preview with arrows, Enter to save, Esc to revert" };
     case "plugins":
@@ -85,7 +85,7 @@ export function getEmptyState(mode: CommandBarMode, query: string, searchQuery?:
   switch (mode) {
     case "search":
       if (!searchQuery) {
-        return { label: "Enter a symbol or name", detail: "Search Yahoo Finance and connected brokers" };
+        return { label: "Type a ticker symbol", detail: "Search Yahoo Finance and connected brokers" };
       }
       return { label: `No matches for "${searchQuery}"`, detail: "Try a symbol, company name, or exchange variant" };
     case "plugins":
@@ -98,9 +98,9 @@ export function getEmptyState(mode: CommandBarMode, query: string, searchQuery?:
       return { label: "No pane templates match", detail: query.trim() || "Plugin-defined pane templates will appear here" };
     default:
       if (query.trim()) {
-        return { label: `No matches for "${query.trim()}"`, detail: "Try a symbol, command, or function code" };
+        return { label: `No matches for "${query.trim()}"`, detail: "Try a ticker, command name, or prefix" };
       }
-      return { label: "No results yet", detail: "Recent securities and commands will appear here" };
+      return { label: "No results yet", detail: "Recent tickers and suggested commands will appear here" };
   }
 }
 
