@@ -12,12 +12,16 @@ import { aiPlugin } from "./builtin/ai";
 import { gloomberbCloudPlugin } from "./builtin/chat";
 import { helpPlugin } from "./builtin/help";
 import { comparisonChartPlugin } from "./builtin/comparison-chart";
+import { econCalendarPlugin } from "./builtin/econ";
+import { worldIndicesPlugin } from "./builtin/world-indices";
+import { marketMoversPlugin } from "./builtin/market-movers";
 import { debugPlugin } from "./builtin/debug";
 import { layoutManagerPlugin } from "./builtin/layout-manager";
 import { yahooPlugin } from "./builtin/yahoo";
 import { predictionMarketsPlugin } from "./prediction-markets";
 import { correlationPlugin } from "./builtin/correlation";
 import { analyticsPlugin } from "./builtin/analytics";
+import { insiderPlugin } from "./builtin/insider";
 
 export interface PluginCatalogEntry {
   plugin: GloomPlugin;
@@ -44,6 +48,10 @@ export const builtinPlugins: GloomPlugin[] = [
   predictionMarketsPlugin,
   correlationPlugin,
   analyticsPlugin,
+  insiderPlugin,
+  econCalendarPlugin,
+  worldIndicesPlugin,
+  marketMoversPlugin,
   debugPlugin,
 ];
 
