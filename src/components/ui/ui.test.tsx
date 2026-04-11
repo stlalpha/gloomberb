@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, useRef, useState } from "react";
 import { testRender } from "@opentui/react/test-utils";
-import type { ScrollBoxRenderable } from "@opentui/core";
+import { DialogProvider } from "@opentui-ui/dialog/react";
+import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core";
 import { Button } from "./button";
 import { DataTable } from "./data-table";
 import { TextField } from "./fields";
 import { ListView } from "./list-view";
+import { MultiSelectChips } from "./multi-select-chips";
+import { MultiSelectDialogButton } from "./multi-select-dialog";
+import { toggleMultiSelectValue } from "./multi-select";
 import { ProgressBar } from "./loading";
 import { Notice } from "./status";
 import { Tabs } from "./tabs";
@@ -17,6 +21,7 @@ let testSetup: Awaited<ReturnType<typeof testRender>> | undefined;
 let setListSelection: ((index: number) => void) | null = null;
 let selectedTableRow: string | null = null;
 let activatedTableRow: string | null = null;
+let selectedChips: string[] = [];
 
 function ScrollableListHarness() {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -112,6 +117,44 @@ function DataTableSectionHarness() {
   );
 }
 
+function MultiSelectChipsHarness() {
+  const [values, setValues] = useState(["sma"]);
+  selectedChips = values;
+
+  return (
+    <MultiSelectChips
+      label="IND"
+      selectedValues={values}
+      onChange={setValues}
+      idPrefix="indicator-chip"
+      options={[
+        { value: "sma", label: "SMA" },
+        { value: "ema", label: "EMA" },
+      ]}
+    />
+  );
+}
+
+function MultiSelectDialogButtonHarness() {
+  const [values, setValues] = useState(["sma"]);
+
+  return (
+    <DialogProvider dialogOptions={{ style: { backgroundColor: "#000000", borderColor: "#ffffff", borderStyle: "single" } }}>
+      <MultiSelectDialogButton
+        label="IND"
+        title="Chart Indicators"
+        selectedValues={values}
+        onChange={setValues}
+        idPrefix="indicator-dialog"
+        options={[
+          { value: "sma", label: "SMA" },
+          { value: "ema", label: "EMA" },
+        ]}
+      />
+    </DialogProvider>
+  );
+}
+
 afterEach(() => {
   if (testSetup) {
     testSetup.renderer.destroy();
@@ -120,6 +163,7 @@ afterEach(() => {
   setListSelection = null;
   selectedTableRow = null;
   activatedTableRow = null;
+  selectedChips = [];
 });
 
 describe("shared UI kit", () => {
@@ -173,6 +217,79 @@ describe("shared UI kit", () => {
     expect(frame).toContain("[✓] News");
     expect(frame).toContain("Notes");
     expect(frame).toContain("Headlines and previews");
+  });
+
+  test("toggles multi-select chips with the mouse", async () => {
+    testSetup = await testRender(<MultiSelectChipsHarness />, { width: 32, height: 3 });
+
+    await act(async () => {
+      await testSetup!.renderOnce();
+    });
+
+    let frame = testSetup.captureCharFrame();
+    expect(frame).toContain("[x] SMA");
+    expect(frame).toContain("[ ] EMA");
+    const emaChip = testSetup.renderer.root.findDescendantById("indicator-chip:ema") as BoxRenderable | undefined;
+    expect(emaChip).toBeDefined();
+
+    await act(async () => {
+      await testSetup!.mockMouse.click(emaChip!.x + 1, emaChip!.y);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {
+      await testSetup!.renderOnce();
+    });
+
+    frame = testSetup.captureCharFrame();
+    expect(frame).toContain("[x] SMA");
+    expect(frame).toContain("[x] EMA");
+    expect(selectedChips).toEqual(["sma", "ema"]);
+  });
+
+  test("opens compact multi-select dialogs from a button", async () => {
+    testSetup = await testRender(<MultiSelectDialogButtonHarness />, { width: 60, height: 18 });
+
+    await act(async () => {
+      await testSetup!.renderOnce();
+    });
+
+    let frame = testSetup.captureCharFrame();
+    expect(frame).toContain("IND: SMA");
+    const button = testSetup.renderer.root.findDescendantById("indicator-dialog:button") as BoxRenderable | undefined;
+    expect(button).toBeDefined();
+    expect(button!.width).toBe(" IND: SMA ".length);
+
+    await act(async () => {
+      await testSetup!.mockMouse.click(button!.x + 1, button!.y);
+      await Promise.resolve();
+      await testSetup!.renderOnce();
+    });
+
+    frame = testSetup.captureCharFrame();
+    expect(frame).toContain("Chart Indicators");
+    expect(frame).toContain("[✓] SMA");
+    expect(frame).toContain("[ ] EMA");
+    expect(frame).not.toContain("Toggle");
+    expect(frame).not.toContain("space toggle");
+
+    await act(async () => {
+      await testSetup!.mockMouse.click(0, 0);
+      await Promise.resolve();
+      await testSetup!.renderOnce();
+    });
+
+    frame = testSetup.captureCharFrame();
+    expect(frame).not.toContain("Chart Indicators");
+  });
+
+  test("keeps shared multi-select values in option order when toggling", () => {
+    const options = [
+      { value: "sma", label: "SMA" },
+      { value: "ema", label: "EMA" },
+    ];
+
+    expect(toggleMultiSelectValue(options, ["sma"], "ema")).toEqual(["sma", "ema"]);
+    expect(toggleMultiSelectValue(options, ["sma", "ema"], "sma")).toEqual(["ema"]);
   });
 
   test("auto-scrolls a scrollable list to keep the selected row visible", async () => {

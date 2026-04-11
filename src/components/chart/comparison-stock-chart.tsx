@@ -84,6 +84,7 @@ import { resolveChartRendererState } from "./native/renderer-selection";
 import { getNativeSurfaceManager } from "./native/surface-manager";
 import { syncCachedNativeSurface } from "./native/surface-sync";
 import { formatAxisCell, formatDateShort, resolveChartAxisWidth, type StyledContent } from "./chart-renderer";
+import { ChartControlHint } from "./chart-control-hint";
 
 const MODE_CHIPS: Record<ComparisonChartRenderMode, string> = {
   area: "A",
@@ -1764,9 +1765,14 @@ function ComparisonStockChartView({
       )}
 
       <box height={1}>
-        <text fg={colors.textMuted}>
-          mouse hover inspect  drag pan  wheel pan  h/l cursor  arrows legend  Enter open  1-7 presets  r res  m mode  0 reset
-        </text>
+        <box flexDirection="row" gap={1}>
+          <ChartControlHint hotkey="m" label="ode" />
+          <ChartControlHint hotkey="r" label="es" />
+          <ChartControlHint hotkey="+/-" label="zoom" />
+          <ChartControlHint hotkey="0" label="reset" />
+          {width >= 72 && <ChartControlHint hotkey="1-7" label="range" />}
+          {width >= 88 && <ChartControlHint hotkey="up/down" label="legend" />}
+        </box>
       </box>
     </box>
   );

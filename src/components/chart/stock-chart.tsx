@@ -1,12 +1,12 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { TextAttributes, type BoxRenderable, type CliRenderer } from "@opentui/core";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import { useAppDispatch, useAppSelector, usePaneInstance, usePaneInstanceId, usePaneSettingValue, usePaneTicker } from "../../state/app-context";
 import { saveConfig } from "../../data/config-store";
 import { getSharedDataProvider } from "../../plugins/registry";
-import { colors, priceColor } from "../../theme/colors";
-import { formatCompact, formatPercentRaw } from "../../utils/format";
-import { formatMarketPriceWithCurrency, formatSignedMarketPrice } from "../../utils/market-format";
+import { colors } from "../../theme/colors";
+import { formatCompact } from "../../utils/format";
+import { formatMarketPriceWithCurrency } from "../../utils/market-format";
 import { useChartQueries, useChartQuery } from "../../market-data/hooks";
 import { instrumentFromTicker, type ChartRequest } from "../../market-data/request-types";
 import { buildChartKey } from "../../market-data/selectors";
@@ -14,17 +14,16 @@ import { usePersistChartControlSelection } from "./chart-pane-settings";
 import { computeSMA, computeEMA } from "./indicators/moving-averages";
 import { computeRSI, computeMACD } from "./indicators/oscillators";
 import { computeBollingerBands } from "./indicators/bands";
-import type { IndicatorConfig } from "./indicators/types";
+import type { IndicatorConfig, MacdResult, OscillatorPoint, OverlayPoint } from "./indicators/types";
 import type { ChartIndicatorOverlays } from "./chart-types";
 import { applyBufferedPanExpansion, getMouseScrollStepCount, resolveHorizontalScrollPanDirection } from "./chart-scroll";
-import { getVisibleWindow, projectChartData, resolveBarSize } from "./chart-data";
+import { getVisibleWindow, projectChartData, resolveBarSize, type ProjectedChartPoint } from "./chart-data";
 import {
   buildPresetDateWindow,
   buildVisibleDateWindow,
   buildVisibleDateWindowFromRange,
   clampDateWindowToBounds,
   clearActivePreset,
-  formatVisibleSpanLabel,
   getCanonicalZoomLevel,
   getDateWindowBounds,
   getMinimumDateStepMs,
@@ -55,6 +54,7 @@ import {
   getTimeRangeForDateWindow,
   isIntradayResolution,
   isRangePresetSupported,
+  maxTimeRange,
   normalizeChartResolutionSupport,
   sortChartResolutions,
   subtractTimeRange,
@@ -87,6 +87,7 @@ import {
 } from "./cursor-motion";
 import {
   CHART_RENDER_MODES,
+  RANGE_DAYS,
   TIME_RANGES,
   type ChartAxisMode,
   type ChartRenderMode,
@@ -95,6 +96,7 @@ import {
   type ChartViewState,
   type ResolvedChartRenderer,
 } from "./chart-types";
+import { ChartControlHint } from "./chart-control-hint";
 import {
   computeBitmapSize,
   intersectCellRects,
@@ -135,6 +137,9 @@ const AXIS_MEASURE_PALETTE = resolveChartPalette({
   negative: colors.negative,
 }, "neutral");
 
+const EMPTY_INDICATOR_CONFIG: IndicatorConfig = {};
+const INDICATOR_RENDER_DEBOUNCE_MS = 120;
+
 interface StockChartProps {
   width: number;
   height: number;
@@ -144,6 +149,9 @@ interface StockChartProps {
   axisMode?: ChartAxisMode;
   historyOverride?: PricePoint[] | null;
   currencyOverride?: string | null;
+  indicatorConfig?: IndicatorConfig;
+  showVolume?: boolean;
+  footerControls?: ReactNode;
 }
 
 interface ResolvedStockChartProps extends StockChartProps {
@@ -193,6 +201,11 @@ type PendingExpansionAction =
   | { kind: "pan-left"; targetPanOffset: number }
   | null;
 
+interface DeferredIndicatorState {
+  key: string;
+  overlays: ChartIndicatorOverlays;
+}
+
 interface ChartMouseEvent {
   x: number;
   y: number;
@@ -209,6 +222,22 @@ interface ChartMouseEvent {
     direction: "up" | "down" | "left" | "right";
     delta: number;
   };
+}
+
+export function resolveChartKeyboardKey(event: { name?: string; sequence?: string }): string {
+  const name = event.name ?? "";
+  const sequence = event.sequence ?? "";
+  const candidates = [name, sequence];
+
+  if (candidates.some((key) => key === "=" || key === "+" || key === "plus")) {
+    return "zoom-in";
+  }
+  if (candidates.some((key) => key === "-" || key === "_" || key === "minus")) {
+    return "zoom-out";
+  }
+
+  const key = name || sequence;
+  return key.length === 1 ? key.toLowerCase() : key;
 }
 
 export interface LocalPlotPointer {
@@ -585,6 +614,7 @@ function buildBufferedDetailWindow(
   maxRange: TimeRange,
   bounds: DateWindowRange | null | undefined,
   minimumSpanMs: number,
+  minimumBufferRange: TimeRange | null = null,
 ): DateWindowRange | null {
   if (!requestedWindow?.end) return null;
 
@@ -597,6 +627,9 @@ function buildBufferedDetailWindow(
         break;
       }
     }
+  }
+  if (minimumBufferRange) {
+    bufferRange = maxTimeRange(bufferRange, clampTimeRangeToMaxRange(minimumBufferRange, maxRange));
   }
 
   return clampDateWindowToBounds(
@@ -931,6 +964,7 @@ function buildResolvedChartRequestPlan(options: {
   effectiveManualResolution: ManualChartResolution | null;
   bounds: DateWindowRange | null;
   bufferRange: TimeRange;
+  minimumBufferRange?: TimeRange | null;
   support: ReadonlyMap<ManualChartResolution, TimeRange>;
   hasResolutionHistoryApi: boolean;
   hasDetailedHistoryApi: boolean;
@@ -945,6 +979,7 @@ function buildResolvedChartRequestPlan(options: {
     effectiveManualResolution,
     bounds,
     bufferRange,
+    minimumBufferRange = null,
     support,
     hasResolutionHistoryApi,
     hasDetailedHistoryApi,
@@ -975,7 +1010,13 @@ function buildResolvedChartRequestPlan(options: {
   const latestDate = bounds?.end ?? null;
   let resolutionRequest: ChartRequest | null = null;
   if (hasResolutionHistoryApi && maxRange && latestDate) {
-    const anchoredRange = getMinimumAnchoredBufferRange(requestedWindow, latestDate, maxRange);
+    const baseAnchoredRange = getMinimumAnchoredBufferRange(requestedWindow, latestDate, maxRange);
+    const minimumAnchoredRange = minimumBufferRange
+      ? clampTimeRangeToMaxRange(minimumBufferRange, maxRange)
+      : null;
+    const anchoredRange = baseAnchoredRange && minimumAnchoredRange
+      ? maxTimeRange(baseAnchoredRange, minimumAnchoredRange)
+      : baseAnchoredRange;
     if (anchoredRange) {
       resolutionRequest = {
         instrument: instrumentRef,
@@ -988,7 +1029,7 @@ function buildResolvedChartRequestPlan(options: {
 
   let detailRequest: ChartRequest | null = null;
   if (hasDetailedHistoryApi && maxRange) {
-    const bufferedWindow = buildBufferedDetailWindow(requestedWindow, maxRange, bounds, minimumSpanMs);
+    const bufferedWindow = buildBufferedDetailWindow(requestedWindow, maxRange, bounds, minimumSpanMs, minimumBufferRange);
     if (bufferedWindow?.start && bufferedWindow.end) {
       detailRequest = {
         instrument: instrumentRef,
@@ -1073,6 +1114,7 @@ function buildNativeBitmapKey(
   mode: ChartRenderMode,
   showVolume: boolean,
   paletteId: string,
+  indicatorKey: string,
 ): string {
   const fingerprint = points
     .map((point) => {
@@ -1080,7 +1122,7 @@ function buildNativeBitmapKey(
       return `${date}:${point.open}:${point.high}:${point.low}:${point.close}:${point.volume ?? 0}`;
     })
     .join("|");
-  return [pointCount, pixelWidth, pixelHeight, mode, showVolume ? "1" : "0", paletteId, fingerprint].join("::");
+  return [pointCount, pixelWidth, pixelHeight, mode, showVolume ? "1" : "0", paletteId, indicatorKey, fingerprint].join("::");
 }
 
 function buildNativeCrosshairBitmapKey(
@@ -1143,6 +1185,115 @@ const INDICATOR_COLORS = [
   "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8",
 ];
 
+export function getIndicatorWarmupPeriod(config: IndicatorConfig): number {
+  const periods = [
+    ...(config.sma ?? []),
+    ...(config.ema ?? []),
+    config.bollinger?.period,
+    config.rsi ?? undefined,
+    config.macd ? config.macd.slow + config.macd.signal : undefined,
+  ].filter((period): period is number => typeof period === "number" && Number.isFinite(period) && period > 0);
+
+  return periods.length > 0 ? Math.max(...periods) : 0;
+}
+
+export function resolveIndicatorBufferRange(
+  visibleRange: TimeRange,
+  currentBufferRange: TimeRange,
+  config: IndicatorConfig,
+): TimeRange {
+  const warmupPeriod = getIndicatorWarmupPeriod(config);
+  if (warmupPeriod <= 0) return currentBufferRange;
+
+  const visibleDays = RANGE_DAYS[visibleRange];
+  if (!Number.isFinite(visibleDays)) return currentBufferRange;
+
+  const targetDays = visibleDays + warmupPeriod;
+  const warmupRange = TIME_RANGE_ORDER.find((range) => RANGE_DAYS[range] >= targetDays) ?? "ALL";
+  return maxTimeRange(currentBufferRange, warmupRange);
+}
+
+function getPricePointTime(point: Pick<PricePoint, "date"> | Pick<ProjectedChartPoint, "date">): number {
+  return coerceChartDate(point.date as Date | string | number).getTime();
+}
+
+function buildProjectedSourceIndexMap(
+  sourcePoints: readonly PricePoint[],
+  projectedPoints: readonly ProjectedChartPoint[],
+  sourceIndexOffset = 0,
+): Map<number, number> {
+  const sourceIndexByTime = new Map<number, number>();
+  sourcePoints.forEach((point, index) => {
+    sourceIndexByTime.set(getPricePointTime(point), sourceIndexOffset + index);
+  });
+
+  const projectedIndexBySourceIndex = new Map<number, number>();
+  projectedPoints.forEach((point, projectedIndex) => {
+    const sourceIndex = sourceIndexByTime.get(getPricePointTime(point));
+    if (sourceIndex !== undefined) {
+      projectedIndexBySourceIndex.set(sourceIndex, projectedIndex);
+    }
+  });
+  return projectedIndexBySourceIndex;
+}
+
+function findPointBySourceIndex<TPoint extends { index: number }>(
+  points: readonly TPoint[],
+  sourceIndex: number,
+): TPoint | null {
+  let low = 0;
+  let high = points.length - 1;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const point = points[mid]!;
+    if (point.index === sourceIndex) return point;
+    if (point.index < sourceIndex) {
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return null;
+}
+
+function reindexOverlayPoints(
+  points: readonly OverlayPoint[],
+  projectedIndexBySourceIndex: ReadonlyMap<number, number>,
+): OverlayPoint[] {
+  const reindexed: OverlayPoint[] = [];
+  projectedIndexBySourceIndex.forEach((projectedIndex, sourceIndex) => {
+    const point = findPointBySourceIndex(points, sourceIndex);
+    if (point) reindexed.push({ index: projectedIndex, value: point.value });
+  });
+  return reindexed;
+}
+
+function reindexOscillatorPoints(
+  points: readonly OscillatorPoint[],
+  projectedIndexBySourceIndex: ReadonlyMap<number, number>,
+): OscillatorPoint[] {
+  const reindexed: OscillatorPoint[] = [];
+  projectedIndexBySourceIndex.forEach((projectedIndex, sourceIndex) => {
+    const point = findPointBySourceIndex(points, sourceIndex);
+    if (point) reindexed.push({ index: projectedIndex, value: point.value });
+  });
+  return reindexed;
+}
+
+function reindexMacdResult(
+  result: MacdResult | null,
+  projectedIndexBySourceIndex: ReadonlyMap<number, number>,
+): MacdResult | null {
+  if (!result) return null;
+  return {
+    macd: reindexOscillatorPoints(result.macd, projectedIndexBySourceIndex),
+    signal: reindexOscillatorPoints(result.signal, projectedIndexBySourceIndex),
+    histogram: reindexOscillatorPoints(result.histogram, projectedIndexBySourceIndex),
+  };
+}
+
 function computeIndicatorOverlays(
   closes: number[],
   config: IndicatorConfig,
@@ -1174,6 +1325,126 @@ function computeIndicatorOverlays(
   return { smaLines, emaLines, bollinger, rsi, macd };
 }
 
+export function computeProjectedIndicatorOverlays(
+  sourcePoints: readonly PricePoint[],
+  projectedPoints: readonly ProjectedChartPoint[],
+  config: IndicatorConfig,
+): ChartIndicatorOverlays {
+  const closes = sourcePoints.map((point) => point.close);
+  const overlays = computeIndicatorOverlays(closes, config);
+  return reindexIndicatorOverlaysForProjection(overlays, sourcePoints, projectedPoints);
+}
+
+export function reindexIndicatorOverlaysForProjection(
+  overlays: ChartIndicatorOverlays,
+  sourcePoints: readonly PricePoint[],
+  projectedPoints: readonly ProjectedChartPoint[],
+  sourceIndexOffset = 0,
+): ChartIndicatorOverlays {
+  const projectedIndexBySourceIndex = buildProjectedSourceIndexMap(
+    sourcePoints,
+    projectedPoints,
+    sourceIndexOffset,
+  );
+
+  return {
+    smaLines: overlays.smaLines.map((line) => ({
+      ...line,
+      points: reindexOverlayPoints(line.points, projectedIndexBySourceIndex),
+    })),
+    emaLines: overlays.emaLines.map((line) => ({
+      ...line,
+      points: reindexOverlayPoints(line.points, projectedIndexBySourceIndex),
+    })),
+    bollinger: overlays.bollinger
+      ? {
+        ...overlays.bollinger,
+        upper: reindexOverlayPoints(overlays.bollinger.upper, projectedIndexBySourceIndex),
+        middle: reindexOverlayPoints(overlays.bollinger.middle, projectedIndexBySourceIndex),
+        lower: reindexOverlayPoints(overlays.bollinger.lower, projectedIndexBySourceIndex),
+      }
+      : null,
+    rsi: overlays.rsi ? reindexOscillatorPoints(overlays.rsi, projectedIndexBySourceIndex) : null,
+    macd: reindexMacdResult(overlays.macd, projectedIndexBySourceIndex),
+  };
+}
+
+function buildIndicatorRenderKey(indicators: ChartIndicatorOverlays | null): string {
+  if (!indicators) return "none";
+
+  const pointKey = (points: readonly OverlayPoint[]) => {
+    const first = points[0];
+    const last = points[points.length - 1];
+    return first && last
+      ? `${points.length}:${first.index}:${first.value.toFixed(6)}:${last.index}:${last.value.toFixed(6)}`
+      : "0";
+  };
+
+  return [
+    indicators.smaLines.map((line) => `sma:${line.period}:${line.color}:${pointKey(line.points)}`).join(","),
+    indicators.emaLines.map((line) => `ema:${line.period}:${line.color}:${pointKey(line.points)}`).join(","),
+    indicators.bollinger
+      ? [
+        `bb:${indicators.bollinger.color}`,
+        pointKey(indicators.bollinger.upper),
+        pointKey(indicators.bollinger.middle),
+        pointKey(indicators.bollinger.lower),
+      ].join(":")
+      : "",
+  ].join("|");
+}
+
+function buildIndicatorConfigKey(config: IndicatorConfig): string {
+  return [
+    `sma:${(config.sma ?? []).join(",")}`,
+    `ema:${(config.ema ?? []).join(",")}`,
+    config.bollinger ? `bb:${config.bollinger.period}:${config.bollinger.stdDev}` : "bb:",
+    `rsi:${config.rsi ?? ""}`,
+    config.macd ? `macd:${config.macd.fast}:${config.macd.slow}:${config.macd.signal}` : "macd:",
+  ].join("|");
+}
+
+function buildIndicatorSourceKey(
+  sourcePoints: readonly PricePoint[],
+  config: IndicatorConfig,
+): string {
+  const first = sourcePoints[0];
+  const last = sourcePoints[sourcePoints.length - 1];
+  return [
+    buildIndicatorConfigKey(config),
+    sourcePoints.length,
+    first ? getPricePointTime(first) : "",
+    first?.close ?? "",
+    last ? getPricePointTime(last) : "",
+    last?.close ?? "",
+  ].join(":");
+}
+
+function buildIndicatorProjectionKey(options: {
+  sourceKey: string;
+  sourcePoints: readonly PricePoint[];
+  sourceIndexOffset: number;
+  projectedPoints: readonly ProjectedChartPoint[];
+  mode: ChartRenderMode;
+}): string {
+  const firstSource = options.sourcePoints[0];
+  const lastSource = options.sourcePoints[options.sourcePoints.length - 1];
+  const firstProjected = options.projectedPoints[0];
+  const lastProjected = options.projectedPoints[options.projectedPoints.length - 1];
+
+  return [
+    options.sourceKey,
+    options.sourceIndexOffset,
+    options.sourcePoints.length,
+    firstSource ? getPricePointTime(firstSource) : "",
+    lastSource ? getPricePointTime(lastSource) : "",
+    options.projectedPoints.length,
+    firstProjected ? getPricePointTime(firstProjected) : "",
+    lastProjected ? getPricePointTime(lastProjected) : "",
+    options.mode,
+  ].join(":");
+}
+
 export function StockChart(props: StockChartProps) {
   const { symbol, ticker, financials } = usePaneTicker();
   return <ResolvedStockChart {...props} symbol={symbol} ticker={ticker} financials={financials} />;
@@ -1188,6 +1459,9 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
   axisMode = "price",
   historyOverride = null,
   currencyOverride = null,
+  indicatorConfig: indicatorConfigOverride,
+  showVolume: showVolumeOverride,
+  footerControls,
   symbol,
   ticker,
   financials,
@@ -1213,6 +1487,13 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
     cursorY: null,
     renderMode: defaultRenderMode,
   });
+  // Read indicator config from the chart caller, falling back to legacy pane settings.
+  const indicatorConfig: IndicatorConfig = indicatorConfigOverride ?? ((pane?.settings?.indicators as IndicatorConfig) ?? EMPTY_INDICATOR_CONFIG);
+  const hasIndicators = !!(indicatorConfig.sma?.length || indicatorConfig.ema?.length || indicatorConfig.rsi || indicatorConfig.macd || indicatorConfig.bollinger);
+  const indicatorBufferRange = useMemo(
+    () => resolveIndicatorBufferRange(viewState.presetRange, viewState.bufferRange, indicatorConfig),
+    [indicatorConfig, viewState.bufferRange, viewState.presetRange],
+  );
   const [requestedResolution, setRequestedResolution] = useState<ChartResolution>(
     compact ? "auto" : storedResolution,
   );
@@ -1220,7 +1501,7 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
   const supportMap = useMemo(() => buildChartResolutionSupportMap(resolutionSupport ?? []), [resolutionSupport]);
   const [renderedAutoView, setRenderedAutoView] = useState<AutoRenderedView | null>(null);
   const [pendingAutoWindowOverride, setPendingAutoWindowOverride] = useState<DateWindowRange | null>(null);
-  const [showVolume, setShowVolume] = useState(!compact);
+  const showVolume = showVolumeOverride ?? !compact;
   const [kittySupport, setKittySupport] = useState<boolean | null>(() => getCachedKittySupport(renderer));
   const [displayCursor, setDisplayCursor] = useState<DisplayCursorState>(EMPTY_DISPLAY_CURSOR);
   const plotRef = useRef<BoxRenderable | null>(null);
@@ -1435,7 +1716,7 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
     !compact && instrumentRef
       ? {
         instrument: instrumentRef,
-        bufferRange: viewState.bufferRange,
+        bufferRange: indicatorBufferRange,
         granularity: "range",
       }
       : null,
@@ -1548,7 +1829,8 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
         effectiveResolution,
         effectiveManualResolution: candidateResolution,
         bounds: baseDateBounds,
-        bufferRange: viewState.bufferRange,
+        bufferRange: indicatorBufferRange,
+        minimumBufferRange: hasIndicators ? indicatorBufferRange : null,
         support: supportMap,
         hasResolutionHistoryApi: !!dataProvider?.getPriceHistoryForResolution,
         hasDetailedHistoryApi: !!dataProvider?.getDetailedPriceHistory,
@@ -1573,7 +1855,8 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
     plannedDateWindow,
     plannedWindowRange,
     supportMap,
-    viewState.bufferRange,
+    indicatorBufferRange,
+    hasIndicators,
   ]);
   const candidateResolutionRequests = useMemo(
     () => dedupeChartRequests(renderCandidates.map((candidate) => candidate.plan.resolutionRequest)),
@@ -2316,10 +2599,6 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
     queueMicrotask(() => renderer.requestRender());
   }, [chartHeight, chartWidth, compact, historyRenderKey, renderer, ticker?.metadata.ticker, viewState.renderMode]);
 
-  const visibleChartDateWindow = useMemo(
-    () => resolveVisibleChartDateWindow(chartWindow.points, displayedDateWindow),
-    [chartWindow.points, displayedDateWindow],
-  );
   const timeAxisDates = useMemo(
     () => chartWindow.points.map((point) => point.date),
     [chartWindow.points],
@@ -2329,22 +2608,71 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
     projectChartData(chartWindow.points, chartWidth, viewState.renderMode, !!compact)
   ), [chartWindow.points, chartWidth, compact, viewState.renderMode]);
 
-  // Read indicator config from pane settings
-  const indicatorConfig: IndicatorConfig = (pane?.settings?.indicators as IndicatorConfig) ?? {};
-  const hasIndicators = !!(indicatorConfig.sma?.length || indicatorConfig.ema?.length || indicatorConfig.rsi || indicatorConfig.macd || indicatorConfig.bollinger);
+  const sourceIndicatorOverlays = useMemo(() => {
+    if (!hasIndicators || !history.length) return null;
+    return computeIndicatorOverlays(history.map((point) => point.close), indicatorConfig);
+  }, [history, hasIndicators, indicatorConfig]);
 
-  const indicators = useMemo(() => {
-    if (!hasIndicators || !projection.points.length) return null;
-    const closes = projection.points.map((p) => p.close);
-    return computeIndicatorOverlays(closes, indicatorConfig);
-  }, [projection.points, hasIndicators, indicatorConfig]);
+  const indicatorSourceKey = useMemo(() => (
+    sourceIndicatorOverlays ? buildIndicatorSourceKey(history, indicatorConfig) : "none"
+  ), [history, indicatorConfig, sourceIndicatorOverlays]);
+  const indicatorProjectionKey = useMemo(() => {
+    if (!sourceIndicatorOverlays || !chartWindow.points.length || !projection.points.length) return "none";
+    return buildIndicatorProjectionKey({
+      sourceKey: indicatorSourceKey,
+      sourcePoints: chartWindow.points,
+      sourceIndexOffset: chartWindow.startIdx,
+      projectedPoints: projection.points,
+      mode: projection.effectiveMode,
+    });
+  }, [
+    chartWindow.points,
+    chartWindow.startIdx,
+    indicatorSourceKey,
+    projection.effectiveMode,
+    projection.points,
+    sourceIndicatorOverlays,
+  ]);
+  const [deferredIndicators, setDeferredIndicators] = useState<DeferredIndicatorState | null>(null);
+
+  useEffect(() => {
+    if (!sourceIndicatorOverlays || indicatorProjectionKey === "none" || !chartWindow.points.length || !projection.points.length) {
+      setDeferredIndicators((current) => (current === null ? current : null));
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setDeferredIndicators({
+        key: indicatorProjectionKey,
+        overlays: reindexIndicatorOverlaysForProjection(
+          sourceIndicatorOverlays,
+          chartWindow.points,
+          projection.points,
+          chartWindow.startIdx,
+        ),
+      });
+    }, INDICATOR_RENDER_DEBOUNCE_MS);
+
+    return () => clearTimeout(timeout);
+  }, [
+    chartWindow.points,
+    chartWindow.startIdx,
+    indicatorProjectionKey,
+    projection.points,
+    sourceIndicatorOverlays,
+  ]);
+
+  const indicators = deferredIndicators?.key === indicatorProjectionKey ? deferredIndicators.overlays : null;
+  const indicatorRenderKey = useMemo(() => {
+    return buildIndicatorRenderKey(indicators);
+  }, [indicators]);
 
   useKeyboard((event) => {
     if (!focused || compact) return;
+    const key = resolveChartKeyboardKey(event);
 
-    switch (event.name) {
-      case "=":
-      case "+":
+    switch (key) {
+      case "zoom-in":
         if (effectiveResolution === "auto") {
           requestAutoWindow(resolveAutoZoomWindow({
             historyPoints: history,
@@ -2357,8 +2685,7 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
         }
         setViewState((current) => applyZoomAroundAnchor(current, current.zoomLevel * 1.5, RIGHT_EDGE_ANCHOR_RATIO, boundsHistory));
         return;
-      case "-":
-      case "_":
+      case "zoom-out":
         if (effectiveResolution === "auto") {
           requestAutoWindow(resolveAutoZoomWindow({
             historyPoints: history,
@@ -2410,9 +2737,6 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
           };
         });
         return;
-      case "v":
-        setShowVolume((value) => !value);
-        return;
       case "a":
         if (effectiveResolution === "auto") {
           requestAutoWindow(shiftDateWindow(navigableDateWindow, panStep / Math.max(chartWidth, 1)));
@@ -2424,14 +2748,21 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
         })) {
           return;
         }
-        setViewState((current) => ({ ...clearActivePreset(current), panOffset: current.panOffset + panStep }));
+        setViewState((current) => {
+          const cleared = clearActivePreset(current);
+          return { ...cleared, panOffset: current.panOffset + panStep };
+        });
         return;
       case "d":
         if (effectiveResolution === "auto") {
           requestAutoWindow(shiftDateWindow(navigableDateWindow, -panStep / Math.max(chartWidth, 1)));
           return;
         }
-        setViewState((current) => ({ ...clearActivePreset(current), panOffset: Math.max(current.panOffset - panStep, 0) }));
+        setViewState((current) => {
+          const cleared = clearActivePreset(current);
+          const nextPanOffset = Math.max(current.panOffset - panStep, 0);
+          return cleared.panOffset === nextPanOffset ? cleared : { ...cleared, panOffset: nextPanOffset };
+        });
         return;
       case "m":
         setViewState((current) => {
@@ -2450,15 +2781,15 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
       }
     }
 
-    if (event.name >= "1" && event.name <= "7") {
-      const index = parseInt(event.name) - 1;
+    if (key >= "1" && key <= "7") {
+      const index = parseInt(key) - 1;
       if (index < TIME_RANGES.length) setRange(TIME_RANGES[index]!);
       return;
     }
 
     if (!interactive) return;
 
-    switch (event.name) {
+    switch (key) {
       case "left":
         if (event.shift) {
           if (effectiveResolution === "auto") {
@@ -2471,7 +2802,10 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
           })) {
             return;
           }
-          setViewState((current) => ({ ...clearActivePreset(current), panOffset: current.panOffset + panStep }));
+          setViewState((current) => {
+            const cleared = clearActivePreset(current);
+            return { ...cleared, panOffset: current.panOffset + panStep };
+          });
         } else {
           cursorMotionKindRef.current = "discrete";
           const pointCount = projection.points.length;
@@ -2518,7 +2852,11 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
             requestAutoWindow(shiftDateWindow(navigableDateWindow, -panStep / Math.max(chartWidth, 1)));
             return;
           }
-          setViewState((current) => ({ ...clearActivePreset(current), panOffset: Math.max(current.panOffset - panStep, 0) }));
+          setViewState((current) => {
+            const cleared = clearActivePreset(current);
+            const nextPanOffset = Math.max(current.panOffset - panStep, 0);
+            return cleared.panOffset === nextPanOffset ? cleared : { ...cleared, panOffset: nextPanOffset };
+          });
         } else {
           cursorMotionKindRef.current = "discrete";
           const pointCount = projection.points.length;
@@ -2648,7 +2986,8 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
     axisMode,
     colors: chartColors,
     timeAxisDates,
-  }), [axisMode, chartColors, chartHeight, chartWidth, compact, projection.effectiveMode, projection.points, showVolume, timeAxisDates, volumeHeight]);
+    indicators,
+  }), [axisMode, chartColors, chartHeight, chartWidth, compact, indicators, projection.effectiveMode, projection.points, showVolume, timeAxisDates, volumeHeight]);
 
   const rendererState = resolveChartRendererState(preferredRenderer, kittySupport, renderer.resolution);
   const effectiveRenderer: ResolvedChartRenderer = rendererState.renderer;
@@ -2820,6 +3159,7 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
         chartColors.candleUp,
         chartColors.candleDown,
       ].join(","),
+      indicatorRenderKey,
     );
     const cachedBitmap = lastNativeBaseBitmapRef.current?.key === bitmapKey
       ? lastNativeBaseBitmapRef.current.bitmap
@@ -2853,6 +3193,7 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
     chartColors.volumeUp,
     compact,
     effectiveRenderer,
+    indicatorRenderKey,
     nativeBaseScene,
     nativeBaseSurfaceId,
     nativeSurfaceManager,
@@ -2938,29 +3279,10 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
   ]);
 
   const hasHistory = chartWindow.points.length > 0;
-  const firstPrice = chartWindow.points[0]?.close ?? 0;
-  const lastPrice = chartWindow.points[chartWindow.points.length - 1]?.close ?? 0;
-  const change = lastPrice - firstPrice;
-  const changePct = firstPrice ? (change / firstPrice) * 100 : 0;
   const requestedMode = projection.requestedMode;
   const showOhlcSummary = projection.effectiveMode === "candles" || projection.effectiveMode === "ohlc";
   const hasSelectionCursor = selectionCursorX !== null;
   const hasDisplayCursor = displayCursorX !== null && displayCursorY !== null;
-  const displayPrice = !hasHistory
-    ? null
-    : hasSelectionCursor
-      ? (selectionScene?.priceAtCursor ?? lastPrice)
-      : lastPrice;
-  const displayChange = !hasHistory
-    ? null
-    : hasSelectionCursor
-      ? (selectionScene?.changeAtCursor ?? change)
-      : change;
-  const displayChangePct = !hasHistory
-    ? null
-    : hasSelectionCursor
-      ? (selectionScene?.changePctAtCursor ?? changePct)
-      : changePct;
   const displayDate = hasSelectionCursor || showOhlcSummary
     ? (selectionScene?.dateAtCursor ? formatDateShort(selectionScene.dateAtCursor) : null)
     : null;
@@ -2979,12 +3301,6 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
       visiblePriceRange,
     )
     : null;
-  const visibleLabel = formatVisibleSpanLabel(
-    visibleChartDateWindow ?? {
-      start: null,
-      end: null,
-    },
-  );
   const isBlockingBody = !compact && renderBodyState.blocking;
   const bodyMessage = !compact
     ? (renderBodyState.errorMessage ?? renderBodyState.emptyMessage)
@@ -3000,7 +3316,6 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
     isUpdating,
     renderer,
     selectedResolution,
-    visibleLabel,
   ]);
 
   const handlePlotMove = (event: ChartMouseEvent) => {
@@ -3083,7 +3398,10 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
       0,
       Math.max(boundsHistory.length - visibleCount, 0),
     );
-    setViewState((current) => ({ ...clearActivePreset(current), panOffset: nextPan }));
+    setViewState((current) => {
+      const cleared = clearActivePreset(current);
+      return cleared.panOffset === nextPan ? cleared : { ...cleared, panOffset: nextPan };
+    });
   };
 
   const handlePlotScroll = (event: ChartMouseEvent) => {
@@ -3214,30 +3532,9 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
         <text attributes={TextAttributes.BOLD} fg={colors.textBright}>
           {ticker?.metadata.ticker ?? ""} - {getChartResolutionLabel(selectedResolution)}
         </text>
-        <text fg={colors.textDim}>{visibleLabel}</text>
         {fallbackResolutionLabel && (
           <text fg={colors.textDim}>{fallbackResolutionLabel}</text>
         )}
-        <text fg={displayChange !== null ? priceColor(displayChange) : colors.textDim}>
-          {displayPrice !== null
-            ? formatMarketPriceWithCurrency(displayPrice, chartCurrency, {
-              assetCategory: chartAssetCategory,
-              minimumFractionDigits: 2,
-              precisionOffset: 1,
-              priceRange: visiblePriceRange,
-            })
-            : "—"}
-        </text>
-        <text fg={displayChange !== null ? priceColor(displayChange) : colors.textDim}>
-          {displayChange !== null && displayChangePct !== null
-            ? `${formatSignedMarketPrice(displayChange, {
-              assetCategory: chartAssetCategory,
-              minimumFractionDigits: 2,
-              precisionOffset: 1,
-              priceRange: visiblePriceRange,
-            })} (${formatPercentRaw(displayChangePct)})`
-            : "No data"}
-        </text>
         {displayDate && <text fg={colors.textDim}>{displayDate}</text>}
         {showOhlcSummary && activePoint && (
           <>
@@ -3352,12 +3649,13 @@ export const ResolvedStockChart = memo(function ResolvedStockChart({
         <text fg={colors.textDim}>{selectionScene?.timeLabels ?? staticResult.timeLabels}</text>
       </box>
 
-      <box height={1}>
-        <text fg={colors.textMuted}>
-          {interactive
-            ? "←→ cursor  ⇧←→ pan  m mode  r res  v vol  0 reset  Esc exit"
-            : "a/d pan  +/- zoom  m mode  r res  v volume  0 reset"}
-        </text>
+      <box height={1} flexDirection="row" gap={1}>
+        <ChartControlHint hotkey="m" label="ode" />
+        {footerControls}
+        <ChartControlHint hotkey="r" label="es" />
+        <ChartControlHint hotkey="+/-" label="zoom" />
+        <ChartControlHint hotkey="0" label="reset" />
+        {width >= 72 && <ChartControlHint hotkey="1-7" label="range" />}
       </box>
     </box>
   );

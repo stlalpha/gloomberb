@@ -1031,6 +1031,7 @@ export interface ChartScene {
   chartRows: number;
   mode: ChartRenderMode;
   colors: ResolvedChartPalette;
+  indicators: ChartIndicatorOverlays | null;
   min: number;
   max: number;
   activeIdx: number;
@@ -1092,18 +1093,42 @@ export function getActivePointIndex(
   return bestIndex;
 }
 
+function getIndicatorOverlayValues(indicators: ChartIndicatorOverlays | null | undefined): number[] {
+  if (!indicators) return [];
+
+  const values: number[] = [];
+  for (const line of indicators.smaLines) {
+    values.push(...line.points.map((point) => point.value));
+  }
+  for (const line of indicators.emaLines) {
+    values.push(...line.points.map((point) => point.value));
+  }
+  if (indicators.bollinger) {
+    values.push(
+      ...indicators.bollinger.upper.map((point) => point.value),
+      ...indicators.bollinger.middle.map((point) => point.value),
+      ...indicators.bollinger.lower.map((point) => point.value),
+    );
+  }
+
+  return values.filter((value) => Number.isFinite(value));
+}
+
 export function buildChartScene(
   points: ProjectedChartPoint[],
   opts: RenderChartOptions,
 ): ChartScene | null {
   if (points.length === 0) return null;
 
-  const min = opts.mode === "candles" || opts.mode === "ohlc"
+  const dataMin = opts.mode === "candles" || opts.mode === "ohlc"
     ? Math.min(...points.map((point) => point.low))
     : Math.min(...points.map((point) => point.close));
-  const max = opts.mode === "candles" || opts.mode === "ohlc"
+  const dataMax = opts.mode === "candles" || opts.mode === "ohlc"
     ? Math.max(...points.map((point) => point.high))
     : Math.max(...points.map((point) => point.close));
+  const indicatorValues = getIndicatorOverlayValues(opts.indicators);
+  const min = indicatorValues.length > 0 ? Math.min(dataMin, ...indicatorValues) : dataMin;
+  const max = indicatorValues.length > 0 ? Math.max(dataMax, ...indicatorValues) : dataMax;
   const activeIdx = getActivePointIndex(points.length, opts.width, opts.cursorX, opts.mode);
   const activePoint = points[activeIdx]!;
   const range = max - min || 1;
@@ -1143,6 +1168,7 @@ export function buildChartScene(
     chartRows,
     mode: opts.mode,
     colors: opts.colors,
+    indicators: opts.indicators ?? null,
     min,
     max,
     activeIdx,

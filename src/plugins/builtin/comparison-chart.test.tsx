@@ -246,8 +246,11 @@ describe("comparisonChartPlugin", () => {
     expect(frame).toContain("2:1W");
     expect(frame).toContain("1D");
     expect(frame).toContain("view:");
-    expect(frame).toContain("arrows legend");
-    expect(frame).toContain("wheel pan");
+    expect(frame).toContain("[m]ode");
+    expect(frame).toContain("[r]es");
+    expect(frame).toContain("[up/down]legend");
+    expect(frame).not.toContain("arrows legend");
+    expect(frame).not.toContain("wheel pan");
     expect(frame).not.toContain("wheel zoom");
     expect(frame).not.toContain("side by side");
   });
