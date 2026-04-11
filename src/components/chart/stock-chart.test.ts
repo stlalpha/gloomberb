@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { BoxRenderable, CliRenderer } from "@opentui/core";
 import {
   getLocalPlotPointer,
+  computeProjectedIndicatorOverlays,
   projectCellCursorToLocalPixels,
   resolveAutoDisplayState,
   resolveAutoZoomWindow,
   resolveAdjacentSelectionCursorX,
+  resolveChartKeyboardKey,
+  resolveIndicatorBufferRange,
   resolveVisibleChartDateWindow,
   resolveSelectionDisplayCursorState,
 } from "./stock-chart";
@@ -113,6 +116,17 @@ describe("stock chart pointer helpers", () => {
 
     expect(resolveAdjacentSelectionCursorX(width - 1, -1, pointCount, width, "candles")).toBe(previous);
     expect(resolveAdjacentSelectionCursorX(previous, 1, pointCount, width, "candles")).toBe(rightmost);
+  });
+});
+
+describe("stock chart keyboard helpers", () => {
+  test("normalizes terminal zoom key variants", () => {
+    expect(resolveChartKeyboardKey({ sequence: "+" })).toBe("zoom-in");
+    expect(resolveChartKeyboardKey({ sequence: "=" })).toBe("zoom-in");
+    expect(resolveChartKeyboardKey({ name: "plus" })).toBe("zoom-in");
+    expect(resolveChartKeyboardKey({ sequence: "-" })).toBe("zoom-out");
+    expect(resolveChartKeyboardKey({ name: "minus" })).toBe("zoom-out");
+    expect(resolveChartKeyboardKey({ name: "A" })).toBe("a");
   });
 });
 
@@ -297,5 +311,36 @@ describe("stock chart auto helpers", () => {
       start: new Date("2026-01-09T00:00:00Z"),
       end: new Date("2026-01-10T00:00:00Z"),
     });
+  });
+});
+
+describe("stock chart indicator helpers", () => {
+  test("computes indicators from warmup history and reindexes them onto the visible projection", () => {
+    const source = makeDailyHistory(1, 30);
+    const projected = source.slice(20).map((point) => ({
+      date: point.date,
+      open: point.close,
+      high: point.close,
+      low: point.close,
+      close: point.close,
+      volume: 0,
+    }));
+
+    const overlays = computeProjectedIndicatorOverlays(source, projected, {
+      sma: [20],
+      bollinger: { period: 20, stdDev: 2 },
+    });
+
+    expect(overlays.smaLines[0]?.points).toHaveLength(projected.length);
+    expect(overlays.smaLines[0]?.points[0]?.index).toBe(0);
+    expect(overlays.smaLines[0]?.points.at(-1)?.index).toBe(projected.length - 1);
+    expect(overlays.bollinger?.upper[0]?.index).toBe(0);
+  });
+
+  test("widens the data buffer enough for selected indicator warmup periods", () => {
+    expect(resolveIndicatorBufferRange("3M", "3M", { sma: [20] })).toBe("6M");
+    expect(resolveIndicatorBufferRange("3M", "6M", { sma: [20] })).toBe("6M");
+    expect(resolveIndicatorBufferRange("3M", "3M", { sma: [200] })).toBe("5Y");
+    expect(resolveIndicatorBufferRange("3M", "3M", {})).toBe("3M");
   });
 });

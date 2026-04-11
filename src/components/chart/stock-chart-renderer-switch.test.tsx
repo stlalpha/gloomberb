@@ -349,7 +349,9 @@ describe("StockChart renderer switching", () => {
 
     const frame = testSetup.captureCharFrame();
     expect(frame).not.toContain("AAPL - AUTO");
-    expect(frame).toContain("view:May 28-Jun 28");
+    expect(frame).toContain("AAPL - 15M");
+    expect(frame).toContain("May 28");
+    expect(frame).not.toContain("view:");
   });
 
   test("chooses supported auto detail resolutions as the visible window changes", async () => {
@@ -608,7 +610,6 @@ describe("StockChart renderer switching", () => {
     const initialFrame = testSetup.captureCharFrame();
     const titleRow = getFrameRowContaining(initialFrame, "AAPL - AUTO");
     expect(titleRow).toBeGreaterThanOrEqual(0);
-    const initialHeader = getFrameLineContaining(initialFrame, "AAPL - AUTO");
 
     for (let index = 0; index < 4; index += 1) {
       await act(async () => {
@@ -620,8 +621,8 @@ describe("StockChart renderer switching", () => {
 
     const pannedFrame = testSetup.captureCharFrame();
     const pannedHeader = getFrameLineContaining(pannedFrame, "AAPL - AUTO");
-    expect(pannedHeader).toContain("view:");
-    expect(pannedHeader).not.toBe(initialHeader);
+    expect(pannedHeader).not.toContain("view:");
+    expect(pannedFrame).not.toBe(initialFrame);
     expect(detailRequests.some((request) => /(m|h)$/i.test(request))).toBe(false);
   });
 
@@ -734,17 +735,15 @@ describe("StockChart renderer switching", () => {
     });
 
     await flushFrames(6);
-    const headerLines: string[] = [];
+    const frames: string[] = [];
     for (let index = 0; index < 10; index += 1) {
       await emitKeypress({ name: "=", sequence: "=" });
       await flushFrames(4);
-      headerLines.push(
-        testSetup.captureCharFrame().split("\n").find((line) => line.includes("AAPL - AUTO")) ?? "",
-      );
+      frames.push(testSetup.captureCharFrame());
     }
 
     expect(detailRequests).toContain("1d");
-    expect(headerLines[6]).not.toBe(headerLines[7]);
-    expect(headerLines[7]).not.toContain("view:Mar 1-Apr 9");
+    expect(frames[6]).not.toBe(frames[7]);
+    expect(frames[7]).not.toContain("view:");
   });
 });
