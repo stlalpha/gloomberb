@@ -297,6 +297,40 @@ function drawLineSeries(
   }
 }
 
+function drawLineWithFill(
+  buf: PixelBuffer,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  lineColor: string,
+  fillColor: string,
+  chartBottom: number,
+) {
+  let dx = Math.abs(x1 - x0);
+  let dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  let x = x0;
+  let y = y0;
+
+  while (true) {
+    setPixel(buf, x, y, lineColor, LAYER_DATA);
+    fillColumn(buf, x, y + 1, chartBottom, fillColor, LAYER_FILL);
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+}
+
 function drawAreaChart(
   buf: PixelBuffer,
   points: ProjectedChartPoint[],
@@ -320,16 +354,10 @@ function drawAreaChart(
       const x1 = getDotX(i + 1, points.length, buf.width, "area");
       const y1 = getScaledY(points[i + 1]!.close, min, max, chartTop, chartBottom);
 
-      // Interpolate fill between consecutive points
-      for (let cx = Math.min(x, x1); cx <= Math.max(x, x1); cx++) {
-        if (cx === x || cx === x1) continue;
-        const t = (cx - x) / Math.max(Math.abs(x1 - x), 1);
-        const iy = Math.round(y + t * (y1 - y));
-        fillColumn(buf, cx, iy + 1, chartBottom, fillColor, LAYER_FILL);
-      }
-
-      // Line on top
-      drawLine(buf, x, y, x1, y1, lineColor, LAYER_DATA);
+      // Walk the line path with Bresenham and fill downward from every pixel.
+      // This eliminates gaps in steep sections where the simple x-interpolation
+      // would skip y-coordinates that the line passes through.
+      drawLineWithFill(buf, x, y, x1, y1, lineColor, fillColor, chartBottom);
     } else {
       setPixel(buf, x, y, lineColor, LAYER_DATA);
     }
