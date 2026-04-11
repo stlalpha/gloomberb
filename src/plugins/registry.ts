@@ -118,6 +118,8 @@ export class PluginRegistry implements PluginRuntimeAccess {
   updateLayoutFn: ((layout: LayoutConfig) => void) = () => {};
   getTermSizeFn: (() => { width: number; height: number }) = () => ({ width: 120, height: 40 });
 
+  registerNewsSourceFn: ((source: import("../types/news-source").NewsSource) => void) = () => {};
+
   notifyFn: ((notification: AppNotificationRequest) => void) = () => {};
   getPaneRuntimeStateFn: ((paneId: string) => PaneRuntimeState | null) = () => null;
   updatePaneRuntimeStateFn: ((paneId: string, patch: Partial<PaneRuntimeState>) => void) = () => {};
@@ -481,6 +483,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
         items.shortcuts.push(shortcut.id);
       },
       registerTickerAction: (action) => { this.tickerActionsMap.set(action.id, action); items.tickerActions.push(action.id); },
+      registerNewsSource: (source) => this.registerNewsSourceFn(source),
 
       getData: (ticker) => this.getDataFn(ticker),
       getTicker: (ticker) => this.getTickerFn(ticker),
