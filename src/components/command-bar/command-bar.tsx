@@ -5181,7 +5181,7 @@ export function CommandBar({
                     value={visibleListState.query}
                     onInput={setActiveListQuery}
                     onChange={setActiveListQuery}
-                    placeholder={visibleListState.kind === "root" ? "Symbol, command, or shortcut..." : "Filter"}
+                    placeholder={visibleListState.kind === "root" ? "Search" : "Filter"}
                     focused
                     width={queryDisplayWidth}
                     backgroundColor={paletteBg}
