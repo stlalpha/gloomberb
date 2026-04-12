@@ -1368,11 +1368,11 @@ export function App({
     const newsAggregator = new NewsAggregator();
     setSharedNewsAggregator(newsAggregator);
     pluginRegistry.registerNewsSourceFn = (source) => newsAggregator.register(source);
-    newsAggregator.start();
 
     for (const plugin of getLoadablePlugins(externalPlugins)) {
       pluginRegistry.register(plugin);
     }
+    newsAggregator.start();
 
     return {
       persistence,

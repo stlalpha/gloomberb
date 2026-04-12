@@ -19,8 +19,17 @@ export class NewsAggregator {
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   }
 
-  register(source: NewsSource): void {
+  register(source: NewsSource): () => void {
     this.sources.set(source.id, source);
+    const cached = source.getCachedMarketNews?.() ?? [];
+    if (cached.length > 0) {
+      this.merge(cached);
+      this.notify();
+    }
+    if (this.pollTimer !== null) {
+      void this.poll();
+    }
+    return () => this.unregister(source.id);
   }
 
   unregister(sourceId: string): void {

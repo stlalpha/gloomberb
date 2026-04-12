@@ -1,33 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TextAttributes } from "@opentui/core";
-import { useKeyboard } from "@opentui/react";
 import type { PaneProps } from "../../../types/plugin";
-import type { MarketNewsItem } from "../../../types/news-source";
 import { colors } from "../../../theme/colors";
 import { useBreakingNews } from "../../../news/hooks";
+import { PageStackView } from "../../../components";
+import { usePluginPaneState } from "../../plugin-runtime";
+import type { MarketNewsItem } from "../../../types/news-source";
 import { detectProviders, getAiProvider, resolveDefaultAiProviderId } from "../ai/providers";
 import { runAiPrompt } from "../ai/runner";
 import { getDigest, setDigest, isDigestInFlight, markDigestInFlight, clearDigestInFlight } from "./digest-store";
-
-function relativeTime(date: Date): string {
-  const ms = Date.now() - date.getTime();
-  if (ms < 60_000) return "<1m";
-  const min = Math.floor(ms / 60_000);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const days = Math.floor(hr / 24);
-  return `${days}d`;
-}
-
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
+import { NewsDetailView } from "./news-detail-view";
+import { NewsArticleTable, type NewsSortPreference } from "./news-table";
 
 const DIGEST_PROMPT = `You are a financial news wire editor. Condense this headline and summary into a single concise actionable bullet point for a professional trader. Include why it matters and potential market impact. Keep it under 120 characters. Respond with ONLY the bullet text, nothing else.
 
 Headline: {title}
 Summary: {summary}`;
+
+const DEFAULT_SORT: NewsSortPreference = { columnId: "time", direction: "desc" };
+const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 function buildDigestPrompt(item: MarketNewsItem): string {
   return DIGEST_PROMPT
@@ -35,32 +26,33 @@ function buildDigestPrompt(item: MarketNewsItem): string {
     .replace("{summary}", item.summary ?? item.title);
 }
 
-const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-export function BreakingPane({ focused, width, height, close }: PaneProps) {
-  const articles = useBreakingNews(20);
+export function BreakingPane({ focused, width, height }: PaneProps) {
+  const articles = useBreakingNews(50);
+  const [selectedArticleId, setSelectedArticleId] = usePluginPaneState<string | null>("breaking:selectedArticleId", null);
+  const [sortPreference, setSortPreference] = usePluginPaneState<NewsSortPreference>("breaking:sort", DEFAULT_SORT);
+  const [detailArticleId, setDetailArticleId] = useState<string | null>(null);
   const [digestVersion, setDigestVersion] = useState(0);
-  const [lastRefresh] = useState(() => new Date());
   const [aiAvailable, setAiAvailable] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiRunning, setAiRunning] = useState(false);
   const [spinFrame, setSpinFrame] = useState(0);
+  const processingRef = useRef(false);
+  const detailArticle = useMemo(
+    () => articles.find((article) => article.id === detailArticleId) ?? null,
+    [articles, detailArticleId],
+  );
 
-  // Detect AI provider on mount
   useEffect(() => {
     const providers = detectProviders();
-    setAiAvailable(providers.some((p) => p.available));
+    setAiAvailable(providers.some((provider) => provider.available));
   }, []);
 
-  // Braille spinner — ticks only while AI is running
   useEffect(() => {
     if (!aiRunning) return;
-    const id = setInterval(() => setSpinFrame((f) => (f + 1) % BRAILLE_FRAMES.length), 80);
+    const id = setInterval(() => setSpinFrame((frame) => (frame + 1) % BRAILLE_FRAMES.length), 80);
     return () => clearInterval(id);
   }, [aiRunning]);
 
-  // Generate digests for articles that don't have one yet
-  const processingRef = useRef(false);
   useEffect(() => {
     if (!aiAvailable || articles.length === 0) return;
     if (processingRef.current) return;
@@ -69,7 +61,7 @@ export function BreakingPane({ focused, width, height, close }: PaneProps) {
     const provider = getAiProvider(providerId);
     if (!provider?.available) return;
 
-    const toDigest = articles.filter((a) => !getDigest(a.id) && !isDigestInFlight(a.id));
+    const toDigest = articles.filter((article) => !getDigest(article.id) && !isDigestInFlight(article.id));
     if (toDigest.length === 0) return;
 
     processingRef.current = true;
@@ -89,12 +81,12 @@ export function BreakingPane({ focused, width, height, close }: PaneProps) {
           const digest = result.trim().slice(0, 150);
           if (digest) {
             setDigest(article.id, digest);
-            setDigestVersion((v) => v + 1);
+            setDigestVersion((version) => version + 1);
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (msg.includes("Credit") || msg.includes("quota") || msg.includes("rate limit")) {
-            setAiError(msg);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (message.includes("Credit") || message.includes("quota") || message.includes("rate limit")) {
+            setAiError(message);
             break;
           }
         } finally {
@@ -106,81 +98,63 @@ export function BreakingPane({ focused, width, height, close }: PaneProps) {
     })();
   }, [aiAvailable, articles]);
 
-  useKeyboard((event) => {
-    if (!focused) return;
-    if (event.name === "escape") {
-      close?.();
-    }
-  });
+  const titleForArticle = useCallback((article: MarketNewsItem) => (
+    getDigest(article.id) ?? article.title
+  ), [digestVersion]);
 
-  const timeW = 5;
-  const bulletW = 2;
-  const titleW = Math.max(10, width - bulletW - timeW - 3);
-
-  if (articles.length === 0) {
-    return (
-      <box flexDirection="column" width={width} height={height}>
-        <box flexGrow={1} alignItems="center" justifyContent="center">
-          <box flexDirection="column" alignItems="center" gap={1}>
-            <text fg={colors.textDim}>No breaking news</text>
-            <text fg={colors.textMuted}>Last checked: {formatTime(lastRefresh)}</text>
-          </box>
-        </box>
-        <box height={1} paddingX={1}>
-          <text fg={colors.textMuted}>Esc close</text>
-        </box>
-      </box>
-    );
-  }
-
-  return (
+  const rootContent = (
     <box flexDirection="column" width={width} height={height}>
-      {/* Header */}
-      <box height={1} paddingX={1} flexDirection="row">
+      <box height={1} flexDirection="row" paddingX={1}>
+        <text fg={colors.textBright} attributes={TextAttributes.BOLD}>Breaking News</text>
+        <box marginLeft={1}>
+          <text fg={colors.textMuted}>{articles.length} stories</text>
+        </box>
         {aiAvailable && (
-          <text fg={colors.textDim} attributes={TextAttributes.BOLD}>AI digest </text>
+          <box marginLeft={1}>
+            <text fg={colors.textDim}>AI digest</text>
+          </box>
         )}
         {aiRunning && (
-          <text fg={colors.positive}>{BRAILLE_FRAMES[spinFrame]} </text>
+          <box marginLeft={1}>
+            <text fg={colors.positive}>{BRAILLE_FRAMES[spinFrame]}</text>
+          </box>
         )}
-        <text fg={colors.textMuted}>{articles.length} stories</text>
+        {aiError && (
+          <box marginLeft={1}>
+            <text fg={colors.warning}>AI paused</text>
+          </box>
+        )}
       </box>
-
-      <scrollbox flexGrow={1} scrollY focusable={false}>
-        <box flexDirection="column">
-          {articles.map((item) => {
-            const timeStr = relativeTime(item.publishedAt).padStart(timeW);
-            const digest = getDigest(item.id);
-            const displayText = (digest ?? item.title).slice(0, titleW);
-            const isDigested = !!digest;
-
-            return (
-              <box
-                key={item.id}
-                flexDirection="row"
-                height={1}
-                paddingX={1}
-              >
-                <box width={bulletW}>
-                  <text fg={isDigested ? colors.positive : colors.textBright}>● </text>
-                </box>
-                <box flexGrow={1}>
-                  <text fg={isDigested ? colors.text : colors.textDim}>{displayText}</text>
-                </box>
-                <box width={timeW}>
-                  <text fg={colors.textDim}>{timeStr}</text>
-                </box>
-              </box>
-            );
-          })}
-        </box>
-      </scrollbox>
-      <box height={1} paddingX={1}>
-        <text fg={colors.textMuted}>
-          {aiAvailable ? "● green = AI digest" : "Install claude/gemini CLI for AI digests"}
-          {" · Esc close"}
-        </text>
-      </box>
+      <NewsArticleTable
+        articles={articles}
+        focused={focused}
+        width={width}
+        selectedArticleId={selectedArticleId}
+        setSelectedArticleId={setSelectedArticleId}
+        sortPreference={sortPreference}
+        setSortPreference={setSortPreference}
+        onOpenArticle={(article) => setDetailArticleId(article.id)}
+        columns={["time", "source", "title", "tickers", "importance"]}
+        emptyStateTitle="No breaking news"
+        emptyStateHint="Breaking stories appear when high-priority headlines arrive."
+        titleForArticle={titleForArticle}
+      />
     </box>
+  );
+
+  const detailContent = detailArticle ? (
+    <NewsDetailView item={detailArticle} width={width} height={Math.max(height - 1, 1)} />
+  ) : (
+    <box flexGrow={1} />
+  );
+
+  return (
+    <PageStackView
+      focused={focused}
+      detailOpen={!!detailArticle}
+      onBack={() => setDetailArticleId(null)}
+      rootContent={rootContent}
+      detailContent={detailContent}
+    />
   );
 }

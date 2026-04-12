@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parseRssFeed, type RssFeedConfig } from "./rss-parser";
 
 const DEFAULT_CONFIG: RssFeedConfig = {
+  id: "test-feed",
   url: "https://example.com/feed",
   name: "Test Feed",
   authority: 60,

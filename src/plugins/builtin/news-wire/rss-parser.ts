@@ -1,20 +1,13 @@
 import type { MarketNewsItem } from "../../../types/news-source";
+import { hashString } from "./hash";
 
 export interface RssFeedConfig {
+  id: string;
   url: string;
   name: string;
   category?: string;
   authority: number; // 0-100
   enabled: boolean;
-}
-
-function hashStr(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = (h * 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, "0");
 }
 
 function decodeHtmlEntities(s: string): string {
@@ -103,7 +96,7 @@ function parseRss2Items(xml: string, config: RssFeedConfig): MarketNewsItem[] {
       ? desc.slice(0, 300) + (desc.length > 300 ? "…" : "")
       : undefined;
 
-    const id = hashStr(`${url}|${title}`);
+    const id = hashString(`${url}|${title}`);
     const publishedAt = parseDate(pubDateRaw);
     const categories = category ? [category] : config.category ? [config.category] : [];
     const imageUrl = extractImageUrl(block);
@@ -160,7 +153,7 @@ function parseAtomEntries(xml: string, config: RssFeedConfig): MarketNewsItem[] 
 
     if (!title && !url) continue;
 
-    const id = hashStr(`${url}|${title}`);
+    const id = hashString(`${url}|${title}`);
     const publishedAt = parseDate(publishedRaw);
     const categories = config.category ? [config.category] : [];
     const imageUrl = extractImageUrl(block);

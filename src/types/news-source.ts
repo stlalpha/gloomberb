@@ -15,5 +15,6 @@ export interface MarketNewsItem {
 export interface NewsSource {
   readonly id: string;
   readonly name: string;
+  getCachedMarketNews?(): MarketNewsItem[];
   fetchMarketNews(): Promise<MarketNewsItem[]>;
 }

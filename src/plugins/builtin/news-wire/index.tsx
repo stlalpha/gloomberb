@@ -1,12 +1,16 @@
 import type { GloomPlugin } from "../../../types/plugin";
 import { createRssNewsSource } from "./rss-source";
-import { DEFAULT_FEEDS } from "./default-feeds";
-import type { RssFeedConfig } from "./rss-parser";
 import { TopPane } from "./top-pane";
 import { FeedPane } from "./feed-pane";
 import { IndustryPane } from "./industry-pane";
 import { BreakingPane } from "./breaking-pane";
 import { setDigestPersistence } from "./digest-store";
+import {
+  addUserNewsFeed,
+  getEnabledNewsFeeds,
+  loadNewsFeedSettings,
+  saveNewsFeedSettings,
+} from "./feed-config";
 
 export const newsWirePlugin: GloomPlugin = {
   id: "news-wire",
@@ -27,17 +31,15 @@ export const newsWirePlugin: GloomPlugin = {
     ctx.registerPaneTemplate({ id: "news-industry-pane", paneId: "news-industry", label: "Industry News", description: "Market news filtered by sector and industry", keywords: ["news", "industry", "sector", "ni", "filter"], shortcut: { prefix: "NI" } });
     ctx.registerPaneTemplate({ id: "news-breaking-pane", paneId: "news-breaking", label: "Breaking News", description: "Breaking and urgent market news", keywords: ["first", "breaking", "urgent", "alert", "flash"], shortcut: { prefix: "FIRST" } });
 
-    const userFeedsJson = ctx.configState.get<string>("feeds");
-    const userFeeds: RssFeedConfig[] = userFeedsJson ? JSON.parse(userFeedsJson) : [];
-    const disabledJson = ctx.configState.get<string>("disabledDefaultFeeds");
-    const disabledNames = new Set<string>(disabledJson ? JSON.parse(disabledJson) : []);
+    const initialSettings = loadNewsFeedSettings(ctx.configState);
+    if (initialSettings.migrated) {
+      void saveNewsFeedSettings(ctx.configState, initialSettings);
+    }
 
-    const feeds = [
-      ...DEFAULT_FEEDS.filter((f) => !disabledNames.has(f.name)),
-      ...userFeeds,
-    ];
-
-    const source = createRssNewsSource(feeds);
+    const source = createRssNewsSource(
+      () => getEnabledNewsFeeds(loadNewsFeedSettings(ctx.configState)),
+      { persistence: ctx.persistence },
+    );
     ctx.registerNewsSource(source);
 
     ctx.registerCommand({
@@ -66,10 +68,8 @@ export const newsWirePlugin: GloomPlugin = {
         const category = values?.category ?? "general";
         if (!url || !name) return;
 
-        const existing: RssFeedConfig[] = userFeedsJson ? JSON.parse(userFeedsJson) : [];
-        existing.push({ url, name, category, authority: 50, enabled: true });
-        await ctx.configState.set("feeds", JSON.stringify(existing));
-        ctx.notify({ body: `Added news feed: ${name}`, type: "success" });
+        const feed = await addUserNewsFeed(ctx.configState, { url, name, category });
+        ctx.notify({ body: `Added news feed: ${feed.name}`, type: "success" });
       },
     });
   },

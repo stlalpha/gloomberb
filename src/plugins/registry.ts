@@ -63,6 +63,7 @@ interface PluginItems {
   shortcuts: string[];
   tickerActions: string[];
   eventDisposers: Array<() => void>;
+  newsSourceDisposers: Array<() => void>;
 }
 
 export class PluginRegistry implements PluginRuntimeAccess {
@@ -124,7 +125,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
   updateLayoutFn: ((layout: LayoutConfig) => void) = () => {};
   getTermSizeFn: (() => { width: number; height: number }) = () => ({ width: 120, height: 40 });
 
-  registerNewsSourceFn: ((source: import("../types/news-source").NewsSource) => void) = () => {};
+  registerNewsSourceFn: ((source: import("../types/news-source").NewsSource) => () => void) = () => () => {};
 
   notifyFn: ((notification: AppNotificationRequest) => void) = () => {};
   getPaneRuntimeStateFn: ((paneId: string) => PaneRuntimeState | null) = () => null;
@@ -206,6 +207,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
       shortcuts: [],
       tickerActions: [],
       eventDisposers: [],
+      newsSourceDisposers: [],
     };
     this.pluginItems.set(pluginId, items);
     return items;
@@ -489,7 +491,11 @@ export class PluginRegistry implements PluginRuntimeAccess {
         items.shortcuts.push(shortcut.id);
       },
       registerTickerAction: (action) => { this.tickerActionsMap.set(action.id, action); items.tickerActions.push(action.id); },
-      registerNewsSource: (source) => this.registerNewsSourceFn(source),
+      registerNewsSource: (source) => {
+        const dispose = this.registerNewsSourceFn(source);
+        items.newsSourceDisposers.push(dispose);
+        return dispose;
+      },
 
       getData: (ticker) => this.getDataFn(ticker),
       getTicker: (ticker) => this.getTickerFn(ticker),
@@ -632,6 +638,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
       }
       for (const actionId of items.tickerActions) this.tickerActionsMap.delete(actionId);
       for (const dispose of items.eventDisposers) dispose();
+      for (const dispose of items.newsSourceDisposers) dispose();
       this.pluginItems.delete(pluginId);
     }
 

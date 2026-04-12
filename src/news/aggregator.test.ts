@@ -26,6 +26,15 @@ function makeSource(id: string, items: MarketNewsItem[]): NewsSource {
   };
 }
 
+function makeCachedSource(id: string, cachedItems: MarketNewsItem[], fetchItems: MarketNewsItem[] = []): NewsSource {
+  return {
+    id,
+    name: id,
+    getCachedMarketNews: () => cachedItems,
+    fetchMarketNews: mock(async () => fetchItems),
+  };
+}
+
 describe("NewsAggregator", () => {
   let agg: NewsAggregator;
 
@@ -166,5 +175,29 @@ describe("NewsAggregator", () => {
     unsub();
     await agg.poll();
     expect(callCount).toBe(2); // unsubscribed, no more calls
+  });
+
+  it("seeds cached source items immediately on register", () => {
+    const cached = makeItem({ url: "https://cached.example.com/1", importance: 70 });
+    let callCount = 0;
+    agg.subscribe(() => { callCount++; });
+
+    const dispose = agg.register(makeCachedSource("cached", [cached]));
+
+    expect(agg.getFirehose(undefined, 10)).toHaveLength(1);
+    expect(agg.getFirehose(undefined, 10)[0]!.url).toBe(cached.url);
+    expect(callCount).toBe(1);
+
+    dispose();
+  });
+
+  it("register disposer removes the source", async () => {
+    const item = makeItem({ url: "https://dispose.example.com/1" });
+    const dispose = agg.register(makeSource("disposable", [item]));
+    dispose();
+
+    await agg.poll();
+
+    expect(agg.getFirehose(undefined, 10)).toHaveLength(0);
   });
 });

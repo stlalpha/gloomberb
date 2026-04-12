@@ -386,7 +386,7 @@ export interface GloomPluginContext {
   registerDetailTab(tab: DetailTabDef): void;
   registerShortcut(shortcut: KeyboardShortcut): void;
   registerTickerAction(action: TickerAction): void;
-  registerNewsSource(source: import("./news-source").NewsSource): void;
+  registerNewsSource(source: import("./news-source").NewsSource): () => void;
 
   getData(ticker: string): TickerFinancials | null;
   getTicker(ticker: string): TickerRecord | null;

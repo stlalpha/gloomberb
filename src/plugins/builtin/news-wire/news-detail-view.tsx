@@ -1,5 +1,4 @@
 import { TextAttributes } from "@opentui/core";
-import { useKeyboard } from "@opentui/react";
 import type { MarketNewsItem } from "../../../types/news-source";
 import { colors } from "../../../theme/colors";
 import { getSharedRegistry } from "../../registry";
@@ -22,19 +21,12 @@ export function wrapText(text: string, width: number): string[] {
   return lines;
 }
 
-export function NewsDetailView({ item, width, height, onClose }: {
+export function NewsDetailView({ item, width, height }: {
   item: MarketNewsItem;
   width: number;
   height: number;
-  onClose: () => void;
 }) {
   const registry = getSharedRegistry();
-
-  useKeyboard((event) => {
-    if (event.name === "escape") {
-      onClose();
-    }
-  });
 
   const innerW = Math.max(10, width - 2);
   const titleLines = wrapText(item.title, innerW);
@@ -99,9 +91,6 @@ export function NewsDetailView({ item, width, height, onClose }: {
           </box>
         </box>
       </scrollbox>
-      <box height={1} paddingX={1}>
-        <text fg={colors.textMuted}>Esc back</text>
-      </box>
     </box>
   );
 }

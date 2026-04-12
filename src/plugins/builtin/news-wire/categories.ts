@@ -81,15 +81,15 @@ export function scoreImportance(authority: number, publishedAt: Date, isBreaking
   return Math.min(100, score);
 }
 
-export function enrichNewsItem(item: MarketNewsItem, knownTickers?: Set<string>): MarketNewsItem {
+export function enrichNewsItem(item: MarketNewsItem, authority = 50, knownTickers?: Set<string>): MarketNewsItem {
   const categories = item.categories.length > 0
     ? [...new Set([...item.categories, ...classifyArticle(item)])]
     : classifyArticle(item);
 
   const text = `${item.title} ${item.summary ?? ""}`;
   const tickers = extractTickers(text, knownTickers);
-  const isBreaking = detectBreaking(item.title, item.publishedAt, 50);
-  const importance = scoreImportance(50, item.publishedAt, isBreaking);
+  const isBreaking = detectBreaking(item.title, item.publishedAt, authority);
+  const importance = scoreImportance(authority, item.publishedAt, isBreaking);
 
   return { ...item, categories, tickers, isBreaking, importance };
 }

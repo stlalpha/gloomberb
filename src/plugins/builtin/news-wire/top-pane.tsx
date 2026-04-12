@@ -1,122 +1,62 @@
-import { useRef, useEffect, useState } from "react";
-import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
-import { useKeyboard } from "@opentui/react";
+import { useMemo, useState } from "react";
+import { TextAttributes } from "@opentui/core";
 import type { PaneProps } from "../../../types/plugin";
-import type { MarketNewsItem } from "../../../types/news-source";
-import { colors, hoverBg } from "../../../theme/colors";
+import { colors } from "../../../theme/colors";
 import { useTopStories } from "../../../news/hooks";
+import { PageStackView } from "../../../components";
+import { usePluginPaneState } from "../../plugin-runtime";
 import { NewsDetailView } from "./news-detail-view";
+import { NewsArticleTable, type NewsSortPreference } from "./news-table";
 
-function relativeTime(date: Date): string {
-  const ms = Date.now() - date.getTime();
-  if (ms < 60_000) return "<1m";
-  const min = Math.floor(ms / 60_000);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const days = Math.floor(hr / 24);
-  return `${days}d`;
-}
+const DEFAULT_SORT: NewsSortPreference = { columnId: "importance", direction: "desc" };
 
+export function TopPane({ focused, width, height }: PaneProps) {
+  const stories = useTopStories(50);
+  const [selectedArticleId, setSelectedArticleId] = usePluginPaneState<string | null>("top:selectedArticleId", null);
+  const [sortPreference, setSortPreference] = usePluginPaneState<NewsSortPreference>("top:sort", DEFAULT_SORT);
+  const [detailArticleId, setDetailArticleId] = useState<string | null>(null);
+  const detailArticle = useMemo(
+    () => stories.find((article) => article.id === detailArticleId) ?? null,
+    [detailArticleId, stories],
+  );
 
-export function TopPane({ focused, width, height, close }: PaneProps) {
-  const stories = useTopStories(20);
-  const [selectedIdx, setSelectedIdx] = useState(0);
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  const [detailItem, setDetailItem] = useState<MarketNewsItem | null>(null);
-  const scrollRef = useRef<ScrollBoxRenderable>(null);
+  const rootContent = (
+    <box flexDirection="column" width={width} height={height}>
+      <box height={1} flexDirection="row" paddingX={1}>
+        <text fg={colors.textBright} attributes={TextAttributes.BOLD}>Top News</text>
+        <box marginLeft={1}>
+          <text fg={colors.textMuted}>{stories.length} stories</text>
+        </box>
+      </box>
+      <NewsArticleTable
+        articles={stories}
+        focused={focused}
+        width={width}
+        selectedArticleId={selectedArticleId}
+        setSelectedArticleId={setSelectedArticleId}
+        sortPreference={sortPreference}
+        setSortPreference={setSortPreference}
+        onOpenArticle={(article) => setDetailArticleId(article.id)}
+        columns={["rank", "time", "source", "title", "tickers", "importance"]}
+        emptyStateTitle="Loading top news..."
+        emptyStateHint="News appears after the RSS feeds respond."
+      />
+    </box>
+  );
 
-  useKeyboard((event) => {
-    if (!focused) return;
-
-    if (event.name === "escape") {
-      if (detailItem) { setDetailItem(null); return; }
-      close?.();
-      return;
-    }
-
-    if (detailItem) return;
-
-    if (event.name === "j" || event.name === "down") {
-      setSelectedIdx((prev) => Math.min(prev + 1, stories.length - 1));
-    } else if (event.name === "k" || event.name === "up") {
-      setSelectedIdx((prev) => Math.max(prev - 1, 0));
-    } else if (event.name === "return") {
-      const item = stories[selectedIdx];
-      if (item) setDetailItem(item);
-    }
-  });
-
-  useEffect(() => {
-    const sb = scrollRef.current;
-    if (!sb?.viewport || stories.length === 0 || selectedIdx < 0) return;
-    const viewportHeight = Math.max(sb.viewport.height, 1);
-    if (selectedIdx < sb.scrollTop) sb.scrollTo(selectedIdx);
-    else if (selectedIdx >= sb.scrollTop + viewportHeight) sb.scrollTo(selectedIdx - viewportHeight + 1);
-  }, [selectedIdx, stories.length]);
-
-  if (detailItem) {
-    return <NewsDetailView item={detailItem} width={width} height={height} onClose={() => setDetailItem(null)} />;
-  }
-
-  const rankW = 3;
-  const srcW = 5;
-  const timeW = 4;
-  const titleW = Math.max(10, width - rankW - srcW - timeW - 5);
+  const detailContent = detailArticle ? (
+    <NewsDetailView item={detailArticle} width={width} height={Math.max(height - 1, 1)} />
+  ) : (
+    <box flexGrow={1} />
+  );
 
   return (
-    <box flexDirection="column" width={width} height={height}>
-      <scrollbox ref={scrollRef} flexGrow={1} scrollY focusable={false}>
-        <box flexDirection="column">
-          {stories.map((item, idx) => {
-            const isSelected = idx === selectedIdx;
-            const isHovered = idx === hoveredIdx;
-            const bg = isSelected ? colors.selected : isHovered ? hoverBg() : undefined;
-            const fg = isSelected ? colors.selectedText : colors.text;
-            const dimFg = isSelected ? colors.selectedText : colors.textDim;
-            const srcBadge = item.source.slice(0, srcW).toUpperCase().padEnd(srcW);
-            const timeStr = relativeTime(item.publishedAt).padStart(timeW);
-            const rank = String(idx + 1).padStart(rankW);
-            const title = item.title.slice(0, titleW);
-
-            return (
-              <box
-                key={item.id}
-                flexDirection="row"
-                height={1}
-                paddingX={1}
-                backgroundColor={bg}
-                onMouseMove={() => setHoveredIdx(idx)}
-                onMouseOut={() => setHoveredIdx(null)}
-                onMouseDown={(event: any) => {
-                  event.preventDefault?.();
-                  if (selectedIdx === idx) {
-                    setDetailItem(item);
-                  } else {
-                    setSelectedIdx(idx);
-                  }
-                }}
-              >
-                <box width={rankW + 1}>
-                  <text fg={dimFg}>{rank}</text>
-                </box>
-                <box width={srcW + 1}>
-                  <text fg={isSelected ? colors.selectedText : colors.textMuted}>{srcBadge}</text>
-                </box>
-                <box width={timeW + 1}>
-                  <text fg={dimFg}>{timeStr}</text>
-                </box>
-                <box flexGrow={1}>
-                  <text fg={fg}>{title}</text>
-                </box>
-              </box>
-            );
-          })}
-        </box>
-      </scrollbox>
-      <box height={1} paddingX={1}>
-        <text fg={colors.textMuted}>j/k navigate · Enter open · Esc close</text>
-      </box>
-    </box>
+    <PageStackView
+      focused={focused}
+      detailOpen={!!detailArticle}
+      onBack={() => setDetailArticleId(null)}
+      rootContent={rootContent}
+      detailContent={detailContent}
+    />
   );
 }
