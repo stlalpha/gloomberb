@@ -16,7 +16,7 @@ function formatAge(ms: number): string {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
-export function FxMatrixPane({ focused, width, height, close }: PaneProps) {
+export function FxMatrixPane({ focused, width, height }: PaneProps) {
   const [rates, setRates] = useState<Map<MajorCurrency, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
@@ -68,9 +68,7 @@ export function FxMatrixPane({ focused, width, height, close }: PaneProps) {
 
   useKeyboard((event) => {
     if (!focused) return;
-    if (event.name === "escape") {
-      close?.();
-    } else if (event.name === "r") {
+    if (event.name === "r") {
       fetchRates();
     }
   });
@@ -142,7 +140,7 @@ export function FxMatrixPane({ focused, width, height, close }: PaneProps) {
       </scrollbox>
 
       <box height={1} paddingX={1}>
-        <text fg={colors.textMuted}>[r]efresh · Esc close</text>
+        <text fg={colors.textMuted}>[r]efresh</text>
       </box>
     </box>
   );

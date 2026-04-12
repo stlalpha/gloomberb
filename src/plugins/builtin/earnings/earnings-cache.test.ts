@@ -1,16 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { DataProvider, EarningsEvent } from "../../../types/data-provider";
 import type { PersistedResourceValue } from "../../../types/persistence";
 import type { PluginPersistence } from "../../../types/plugin";
 import {
-  attachYieldCurvePersistence,
-  isInverted,
-  loadYieldCurve,
-  parseYieldPoints,
-  resetYieldCurvePersistence,
-  TREASURY_MATURITIES,
-  YIELD_CURVE_CACHE_POLICY,
-  type YieldPoint,
-} from "./treasury-data";
+  attachEarningsCalendarPersistence,
+  buildEarningsCacheKey,
+  EARNINGS_CALENDAR_CACHE_POLICY,
+  loadEarningsCalendar,
+  resetEarningsCalendarPersistence,
+} from "./earnings-cache";
 
 class MemoryPluginPersistence implements PluginPersistence {
   private readonly resources = new Map<string, PersistedResourceValue<unknown>>();
@@ -85,8 +83,8 @@ class MemoryPluginPersistence implements PluginPersistence {
     const record: PersistedResourceValue<T> = {
       value,
       fetchedAt: now - 60_000,
-      staleAt: options.stale ? now - 1 : now + YIELD_CURVE_CACHE_POLICY.staleMs,
-      expiresAt: options.expired ? now - 1 : now + YIELD_CURVE_CACHE_POLICY.expireMs,
+      staleAt: options.stale ? now - 1 : now + EARNINGS_CALENDAR_CACHE_POLICY.staleMs,
+      expiresAt: options.expired ? now - 1 : now + EARNINGS_CALENDAR_CACHE_POLICY.expireMs,
       sourceKey: options.sourceKey ?? "",
       schemaVersion: 1,
       stale: !!options.stale,
@@ -109,104 +107,75 @@ class MemoryPluginPersistence implements PluginPersistence {
   }
 }
 
-const SAMPLE_POINTS: YieldPoint[] = [
-  { maturity: "2Y", maturityYears: 2, yield: 4.5 },
-  { maturity: "10Y", maturityYears: 10, yield: 4.3 },
-];
+function eventFor(symbol: string): EarningsEvent {
+  return {
+    symbol,
+    name: `${symbol} Corp`,
+    earningsDate: new Date("2026-05-01T12:00:00Z"),
+    epsEstimate: 1.23,
+    epsActual: null,
+    revenueEstimate: 1_000_000,
+    revenueActual: null,
+    surprise: null,
+    timing: "",
+  };
+}
 
 afterEach(() => {
-  resetYieldCurvePersistence();
+  resetEarningsCalendarPersistence();
 });
 
-describe("parseYieldPoints", () => {
-  test("filters out null yields", () => {
-    const points: YieldPoint[] = [
-      { maturity: "2Y", maturityYears: 2, yield: 4.5 },
-      { maturity: "5Y", maturityYears: 5, yield: null },
-      { maturity: "10Y", maturityYears: 10, yield: 4.3 },
-    ];
-    const result = parseYieldPoints(points);
-    expect(result).toHaveLength(2);
-    expect(result[0]!.maturity).toBe("2Y");
-    expect(result[1]!.maturity).toBe("10Y");
-  });
-
-  test("returns empty for all nulls", () => {
-    expect(parseYieldPoints([{ maturity: "2Y", maturityYears: 2, yield: null }])).toEqual([]);
+describe("buildEarningsCacheKey", () => {
+  test("normalizes symbol order, case, and duplicates", () => {
+    expect(buildEarningsCacheKey([" msft ", "AAPL", "aapl"])).toBe("AAPL,MSFT");
   });
 });
 
-describe("isInverted", () => {
-  test("detects inverted curve (2Y > 10Y)", () => {
-    const points: YieldPoint[] = [
-      { maturity: "2Y", maturityYears: 2, yield: 5.0 },
-      { maturity: "10Y", maturityYears: 10, yield: 4.3 },
-    ];
-    expect(isInverted(points)).toBe(true);
-  });
-
-  test("normal curve is not inverted", () => {
-    const points: YieldPoint[] = [
-      { maturity: "2Y", maturityYears: 2, yield: 4.0 },
-      { maturity: "10Y", maturityYears: 10, yield: 4.5 },
-    ];
-    expect(isInverted(points)).toBe(false);
-  });
-
-  test("returns false when data is missing", () => {
-    expect(isInverted([])).toBe(false);
-    expect(isInverted([{ maturity: "2Y", maturityYears: 2, yield: 4.0 }])).toBe(false);
-  });
-});
-
-describe("TREASURY_MATURITIES", () => {
-  test("has 10 maturities in ascending order", () => {
-    expect(TREASURY_MATURITIES).toHaveLength(10);
-    for (let i = 1; i < TREASURY_MATURITIES.length; i++) {
-      expect(TREASURY_MATURITIES[i]!.years).toBeGreaterThan(TREASURY_MATURITIES[i - 1]!.years);
-    }
-  });
-});
-
-describe("loadYieldCurve cache", () => {
-  test("uses a fresh plugin resource cache without fetching", async () => {
-    const persistence = new MemoryPluginPersistence();
-    attachYieldCurvePersistence(persistence);
-    persistence.setResource("treasury-yield-curve", "latest", SAMPLE_POINTS, {
-      sourceKey: "fred",
-      cachePolicy: YIELD_CURVE_CACHE_POLICY,
-    });
-    let fetchCalls = 0;
-
-    const points = await loadYieldCurve("key", {
-      fetcher: async () => {
-        fetchCalls += 1;
-        throw new Error("unexpected fetch");
+describe("loadEarningsCalendar", () => {
+  test("keeps separate caches for different symbol sets", async () => {
+    const calls: string[][] = [];
+    const provider = {
+      id: "test",
+      name: "Test",
+      getEarningsCalendar: async (symbols: string[]) => {
+        calls.push(symbols);
+        return symbols.map(eventFor);
       },
-    });
+    } as DataProvider;
 
-    expect(points).toEqual(SAMPLE_POINTS);
-    expect(fetchCalls).toBe(0);
+    const aapl = await loadEarningsCalendar(provider, ["AAPL"]);
+    const msft = await loadEarningsCalendar(provider, ["MSFT"]);
+    const aaplAgain = await loadEarningsCalendar(provider, ["aapl"]);
+
+    expect(aapl.map((event) => event.symbol)).toEqual(["AAPL"]);
+    expect(msft.map((event) => event.symbol)).toEqual(["MSFT"]);
+    expect(aaplAgain.map((event) => event.symbol)).toEqual(["AAPL"]);
+    expect(calls).toEqual([["AAPL"], ["MSFT"]]);
   });
 
-  test("falls back to stale plugin resource cache when refresh fails", async () => {
+  test("falls back to stale persisted data when refresh fails", async () => {
     const persistence = new MemoryPluginPersistence();
-    attachYieldCurvePersistence(persistence);
-    persistence.seedResource("treasury-yield-curve", "latest", SAMPLE_POINTS, {
-      sourceKey: "fred",
+    attachEarningsCalendarPersistence(persistence);
+    persistence.seedResource("calendar", "AAPL", [{
+      ...eventFor("AAPL"),
+      earningsDate: "2026-05-01T12:00:00.000Z",
+    }], {
+      sourceKey: "earnings",
       stale: true,
     });
-    let fetchCalls = 0;
 
-    const points = await loadYieldCurve("key", {
-      force: true,
-      fetcher: async () => {
-        fetchCalls += 1;
+    const provider = {
+      id: "test",
+      name: "Test",
+      getEarningsCalendar: async () => {
         throw new Error("offline");
       },
-    });
+    } as DataProvider;
 
-    expect(points).toEqual(SAMPLE_POINTS);
-    expect(fetchCalls).toBe(1);
+    const events = await loadEarningsCalendar(provider, ["AAPL"], { force: true });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]!.symbol).toBe("AAPL");
+    expect(events[0]!.earningsDate).toBeInstanceOf(Date);
   });
 });

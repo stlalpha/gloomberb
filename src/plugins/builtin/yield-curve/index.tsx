@@ -6,15 +6,16 @@ import { colors } from "../../../theme/colors";
 import { useAppSelector } from "../../../state/app-context";
 import { renderChart, resolveChartPalette } from "../../../components/chart/chart-renderer";
 import type { ProjectedChartPoint } from "../../../components/chart/chart-data";
-import { fetchYieldCurve, parseYieldPoints, isInverted, TREASURY_MATURITIES, type YieldPoint } from "./treasury-data";
-
-const CACHE_TTL_MS = 15 * 60 * 1000;
-
-interface Cache {
-  points: YieldPoint[];
-  fetchedAt: number;
-  dataDate: string | null;
-}
+import {
+  attachYieldCurvePersistence,
+  loadYieldCurve,
+  parseYieldPoints,
+  isInverted,
+  resetYieldCurvePersistence,
+  TREASURY_MATURITIES,
+  type YieldPoint,
+} from "./treasury-data";
+import { FRED_API_KEY_COMMAND_LABEL, getSharedFredApiKey } from "../fred-settings";
 
 function formatYield(y: number | null): string {
   if (y == null) return "—";
@@ -28,23 +29,18 @@ function spreadBp(points: YieldPoint[]): number | null {
   return Math.round((y10 - y2) * 100);
 }
 
-export function YieldCurvePane({ focused, width, height, close }: PaneProps) {
+export function YieldCurvePane({ focused, width, height }: PaneProps) {
   const config = useAppSelector((s) => s.config);
-  const apiKey = config.pluginConfig?.["econ-calendar"]?.fredApiKey as string | undefined;
+  const apiKey = getSharedFredApiKey(config);
 
   const [points, setPoints] = useState<YieldPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const cacheRef = useRef<Cache | null>(null);
   const fetchGenRef = useRef(0);
 
   const load = async (force = false) => {
     if (!apiKey) return;
-    if (!force && cacheRef.current && Date.now() - cacheRef.current.fetchedAt < CACHE_TTL_MS) {
-      setPoints(cacheRef.current.points);
-      return;
-    }
 
     fetchGenRef.current += 1;
     const gen = fetchGenRef.current;
@@ -52,9 +48,8 @@ export function YieldCurvePane({ focused, width, height, close }: PaneProps) {
     setError(null);
 
     try {
-      const data = await fetchYieldCurve(apiKey);
+      const data = await loadYieldCurve(apiKey, { force });
       if (fetchGenRef.current !== gen) return;
-      cacheRef.current = { points: data, fetchedAt: Date.now(), dataDate: null };
       setPoints(data);
     } catch (err) {
       if (fetchGenRef.current !== gen) return;
@@ -70,9 +65,7 @@ export function YieldCurvePane({ focused, width, height, close }: PaneProps) {
 
   useKeyboard((ev) => {
     if (!focused) return;
-    if (ev.name === "escape") {
-      close?.();
-    } else if (ev.name === "r") {
+    if (ev.name === "r") {
       load(true);
     }
   });
@@ -81,10 +74,10 @@ export function YieldCurvePane({ focused, width, height, close }: PaneProps) {
     return (
       <box flexDirection="column" width={width} height={height}>
         <box flexGrow={1} justifyContent="center" alignItems="center">
-          <text fg={colors.textMuted}>Configure FRED API key: type 'Set FRED' in command bar</text>
+          <text fg={colors.textMuted}>{`Configure FRED API key: type '${FRED_API_KEY_COMMAND_LABEL}' in command bar`}</text>
         </box>
         <box height={1} paddingX={1}>
-          <text fg={colors.textMuted}>[r]efresh · Esc close</text>
+          <text fg={colors.textMuted}>[r]efresh</text>
         </box>
       </box>
     );
@@ -97,7 +90,7 @@ export function YieldCurvePane({ focused, width, height, close }: PaneProps) {
           <text fg={colors.textMuted}>Loading...</text>
         </box>
         <box height={1} paddingX={1}>
-          <text fg={colors.textMuted}>[r]efresh · Esc close</text>
+          <text fg={colors.textMuted}>[r]efresh</text>
         </box>
       </box>
     );
@@ -110,7 +103,7 @@ export function YieldCurvePane({ focused, width, height, close }: PaneProps) {
           <text fg={colors.negative}>{error}</text>
         </box>
         <box height={1} paddingX={1}>
-          <text fg={colors.textMuted}>[r]efresh · Esc close</text>
+          <text fg={colors.textMuted}>[r]efresh</text>
         </box>
       </box>
     );
@@ -203,7 +196,7 @@ export function YieldCurvePane({ focused, width, height, close }: PaneProps) {
 
       {/* Footer */}
       <box height={1} paddingX={1}>
-        <text fg={colors.textMuted}>[r]efresh · Esc close</text>
+        <text fg={colors.textMuted}>[r]efresh</text>
       </box>
     </box>
   );
@@ -217,8 +210,11 @@ export const yieldCurvePlugin: GloomPlugin = {
   toggleable: true,
 
   setup(ctx) {
-    // no extra commands needed
-    void ctx;
+    attachYieldCurvePersistence(ctx.persistence);
+  },
+
+  dispose() {
+    resetYieldCurvePersistence();
   },
 
   panes: [
