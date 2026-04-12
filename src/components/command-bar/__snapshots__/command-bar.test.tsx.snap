@@ -4,7 +4,7 @@ exports[`CommandBar renders the default layout with opencode-style chrome 1`] = 
 "                                                                                
                                                                                 
                 BROWSE                                                          
-                Symbol, command, or shortcut...                                 
+                Search                                                          
                                                                                 
                 Tickers                                                         
                 › AAPL                          NASDAQ                          
@@ -88,7 +88,7 @@ exports[`CommandBar collapses the trailing column on narrow terminals 1`] = `
 "                                          
                                           
        BROWSE                             
-       Symbol, command, or shortcut...    
+       Search                             
                                           
        Tickers                            
        › AAPL                  NASDAQ     

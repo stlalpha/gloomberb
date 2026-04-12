@@ -599,10 +599,7 @@ describe("CommandBar", () => {
     await testSetup.renderOnce();
     expect(testSetup.captureCharFrame()).toContain("T AMD");
 
-    await act(async () => {
-      testSetup!.mockInput.pressKey("backspace", { meta: true });
-      await testSetup!.renderOnce();
-    });
+    await emitKeypress(testSetup, { name: "backspace", sequence: "\b", meta: true });
 
     const frame = testSetup.captureCharFrame();
     expect(frame).toContain("BROWSE");
