@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
+import { DataTable, type DataTableCell, type DataTableColumn } from "../../../components";
 import type { GloomPlugin, GloomPluginContext, PaneProps } from "../../../types/plugin";
 import type { AlertCondition, AlertRule } from "./types";
 import { colors } from "../../../theme/colors";
-import { useAppDispatch } from "../../../state/app-context";
 import { getSharedRegistry } from "../../registry";
 import { usePluginConfigState } from "../../plugin-runtime";
 import {
@@ -18,15 +18,6 @@ import {
 const ALERTS_KEY = "alerts";
 const POLL_INTERVAL_MS = 30_000;
 
-function conditionIcon(condition: string): string {
-  switch (condition) {
-    case "above": return "▲";
-    case "below": return "▼";
-    case "crosses": return "↕";
-    default: return "?";
-  }
-}
-
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
   const seconds = Math.floor(diff / 1000);
@@ -39,152 +30,206 @@ function relativeTime(ts: number): string {
   return `${days}d ago`;
 }
 
-const CONDITIONS: AlertCondition[] = ["above", "below", "crosses"];
-const CONDITION_LABELS: Record<AlertCondition, string> = {
-  above: "▲ Above",
-  below: "▼ Below",
-  crosses: "↕ Crosses",
-};
+interface AlertCommandInput {
+  symbol: string;
+  condition: AlertCondition;
+  price: number;
+}
 
-type FormField = "symbol" | "condition" | "price";
-const FORM_FIELDS: FormField[] = ["symbol", "condition", "price"];
+function parseAlertCondition(value: string | undefined): AlertCondition | null {
+  const normalized = value?.trim().toLowerCase();
+  switch (normalized) {
+    case ">":
+    case "above":
+    case "over":
+    case "gt":
+      return "above";
+    case "<":
+    case "below":
+    case "under":
+    case "lt":
+      return "below";
+    case "x":
+    case "cross":
+    case "crosses":
+      return "crosses";
+    default:
+      return null;
+  }
+}
 
-function AlertsPane({ focused, width, height, close }: PaneProps) {
+function parseAlertShortcutValues(input: string): Record<string, string> {
+  const parts = input.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return {};
+  if (parts.length > 3) {
+    throw new Error("Use SA SYMBOL above|below|crosses PRICE.");
+  }
+
+  const values: Record<string, string> = {
+    symbol: parts[0]!.toUpperCase(),
+  };
+
+  if (parts[1]) {
+    const condition = parseAlertCondition(parts[1]);
+    if (!condition) {
+      throw new Error("Use above, below, crosses, >, <, or x.");
+    }
+    values.condition = condition;
+  }
+
+  if (parts[2]) {
+    const price = Number.parseFloat(parts[2]!.replace(/^\$/, ""));
+    if (!Number.isFinite(price)) {
+      throw new Error("Use a numeric target price.");
+    }
+    values.price = String(price);
+  }
+
+  return values;
+}
+
+function parseAlertCommandValues(values?: Record<string, string>): AlertCommandInput | null {
+  const shortcut = values?.shortcut?.trim();
+  if (shortcut) {
+    values = {
+      ...values,
+      ...parseAlertShortcutValues(shortcut),
+    };
+  }
+
+  const symbol = values?.symbol?.trim().toUpperCase();
+  const condition = parseAlertCondition(values?.condition);
+  const priceStr = values?.price?.trim();
+  if (!symbol || !condition || !priceStr) return null;
+  const price = Number.parseFloat(priceStr);
+  if (!Number.isFinite(price)) return null;
+  return { symbol, condition, price };
+}
+
+type AlertColumnId =
+  | "status"
+  | "symbol"
+  | "condition"
+  | "target"
+  | "last"
+  | "triggered"
+  | "rearm"
+  | "delete";
+
+type AlertColumn = DataTableColumn & { id: AlertColumnId };
+
+function buildAlertColumns(width: number): AlertColumn[] {
+  if (width < 80) {
+    return [
+      { id: "status", label: "St", width: 4 },
+      { id: "symbol", label: "Symbol", width: 8 },
+      { id: "condition", label: "Cond", width: 5 },
+      { id: "target", label: "Target", width: 9, align: "right" },
+      { id: "last", label: "Last", width: 9, align: "right" },
+      { id: "triggered", label: "When", width: 7 },
+      { id: "rearm", label: "", width: 5 },
+      { id: "delete", label: "", width: 3 },
+    ];
+  }
+
+  return [
+    { id: "status", label: "Status", width: 10 },
+    { id: "symbol", label: "Symbol", width: 10 },
+    { id: "condition", label: "Condition", width: 9 },
+    { id: "target", label: "Target", width: 10, align: "right" },
+    { id: "last", label: "Last", width: 10, align: "right" },
+    { id: "triggered", label: "Triggered", width: 11 },
+    { id: "rearm", label: "", width: 8 },
+    { id: "delete", label: "", width: 8 },
+  ];
+}
+
+export function AlertsPane({ focused, width, height, close }: PaneProps) {
   const [alertsJson, setAlertsJson] = usePluginConfigState<string>(ALERTS_KEY, "[]");
-  const alerts = deserializeAlerts(alertsJson);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const scrollRef = useRef<ScrollBoxRenderable>(null);
+  const headerScrollRef = useRef<ScrollBoxRenderable>(null);
+  const columns = useMemo(() => buildAlertColumns(width), [width]);
 
-  const dispatch = useAppDispatch();
+  const { alerts, rows, activeCount, triggeredCount } = useMemo(() => {
+    const parsed = deserializeAlerts(alertsJson);
+    const activeAlerts = parsed.filter((a) => a.status === "active");
+    const triggeredAlerts = parsed
+      .filter((a) => a.status === "triggered")
+      .sort((a, b) => (b.triggeredAt ?? 0) - (a.triggeredAt ?? 0));
 
-  // Inline add form state
-  const [adding, setAdding] = useState(false);
-  const [formSymbol, setFormSymbol] = useState("");
-  const [formCondition, setFormCondition] = useState<AlertCondition>("below");
-  const [formPrice, setFormPrice] = useState("");
-  const [formField, setFormField] = useState<FormField>("symbol");
+    return {
+      alerts: parsed,
+      rows: [...activeAlerts, ...triggeredAlerts],
+      activeCount: activeAlerts.length,
+      triggeredCount: triggeredAlerts.length,
+    };
+  }, [alertsJson]);
 
-  const activeAlerts = alerts.filter((a) => a.status === "active");
-  const triggeredAlerts = alerts
-    .filter((a) => a.status === "triggered")
-    .sort((a, b) => (b.triggeredAt ?? 0) - (a.triggeredAt ?? 0));
-
-  const allDisplayed = [...activeAlerts, ...triggeredAlerts];
-  const activeCount = activeAlerts.length;
-
-  const saveAlerts = (next: AlertRule[]) => {
+  const saveAlerts = useCallback((next: AlertRule[]) => {
     setAlertsJson(serializeAlerts(next));
-  };
+  }, [setAlertsJson]);
 
-  const deleteAlert = (id: string) => {
+  const deleteAlert = useCallback((id: string) => {
     saveAlerts(alerts.filter((a) => a.id !== id));
-    setSelectedIdx((prev) => Math.max(0, Math.min(prev, allDisplayed.length - 2)));
-  };
+    setSelectedIdx((prev) => Math.max(0, Math.min(prev, rows.length - 2)));
+  }, [alerts, rows.length, saveAlerts]);
 
-  const rearmAlert = (id: string) => {
+  const rearmAlert = useCallback((id: string) => {
     saveAlerts(
       alerts.map((a) =>
         a.id === id ? { ...a, status: "active" as const, triggeredAt: undefined } : a,
       ),
     );
-  };
+  }, [alerts, saveAlerts]);
 
-  // Capture input when form is active so app-level handlers don't steal keys
+  const openSetAlertCommand = useCallback(() => {
+    getSharedRegistry()?.openPluginCommandWorkflow("set-alert");
+  }, []);
+
+  const syncHeaderScroll = useCallback(() => {
+    const body = scrollRef.current;
+    const header = headerScrollRef.current;
+    if (body && header && header.scrollLeft !== body.scrollLeft) {
+      header.scrollLeft = body.scrollLeft;
+    }
+  }, []);
+
+  const handleBodyScrollActivity = useCallback(() => {
+    syncHeaderScroll();
+  }, [syncHeaderScroll]);
+
   useEffect(() => {
-    dispatch({ type: "SET_INPUT_CAPTURED", captured: adding });
-    return () => {
-      if (adding) dispatch({ type: "SET_INPUT_CAPTURED", captured: false });
-    };
-  }, [adding, dispatch]);
-
-  const startAdding = () => {
-    setFormSymbol("");
-    setFormCondition("below");
-    setFormPrice("");
-    setFormField("symbol");
-    setAdding(true);
-  };
-
-  const submitForm = () => {
-    const symbol = formSymbol.trim().toUpperCase();
-    const price = parseFloat(formPrice);
-    if (!symbol || isNaN(price)) return;
-    const alert = createAlert(symbol, formCondition, price);
-    saveAlerts([...alerts, alert]);
-    setAdding(false);
-  };
-
-  const cancelForm = () => {
-    setAdding(false);
-  };
+    setSelectedIdx((prev) => (rows.length === 0 ? 0 : Math.min(prev, rows.length - 1)));
+  }, [rows.length]);
 
   useKeyboard((event) => {
     if (!focused) return;
 
-    if (adding) {
-      if (event.name === "escape") {
-        cancelForm();
-        return;
-      }
-      if (event.name === "return") {
-        submitForm();
-        return;
-      }
-
-      // Arrow keys move between fields (not j/k — those type characters)
-      if (event.name === "down") {
-        const idx = FORM_FIELDS.indexOf(formField);
-        if (idx < FORM_FIELDS.length - 1) setFormField(FORM_FIELDS[idx + 1]!);
-        return;
-      }
-      if (event.name === "up") {
-        const idx = FORM_FIELDS.indexOf(formField);
-        if (idx > 0) setFormField(FORM_FIELDS[idx - 1]!);
-        return;
-      }
-
-      // Field-specific input handling
-      // OpenTUI: event.name is the key name — single chars are "a", "b", "1", etc.
-      const ch = event.name;
-      const isChar = ch.length === 1;
-
-      if (formField === "symbol") {
-        if (event.name === "backspace") {
-          setFormSymbol((prev) => prev.slice(0, -1));
-        } else if (isChar && /[a-zA-Z0-9.=^-]/.test(ch)) {
-          setFormSymbol((prev) => prev + ch.toUpperCase());
-        }
-      } else if (formField === "condition") {
-        if (event.name === "left" || event.name === "h") {
-          const idx = CONDITIONS.indexOf(formCondition);
-          setFormCondition(CONDITIONS[(idx - 1 + CONDITIONS.length) % CONDITIONS.length]!);
-        } else if (event.name === "right" || event.name === "l") {
-          const idx = CONDITIONS.indexOf(formCondition);
-          setFormCondition(CONDITIONS[(idx + 1) % CONDITIONS.length]!);
-        }
-      } else if (formField === "price") {
-        if (event.name === "backspace") {
-          setFormPrice((prev) => prev.slice(0, -1));
-        } else if (isChar && /[0-9.]/.test(ch)) {
-          setFormPrice((prev) => prev + ch);
-        }
-      }
-      return;
-    }
-
     if (event.name === "j" || event.name === "down") {
-      setSelectedIdx((prev) => Math.min(prev + 1, allDisplayed.length - 1));
+      event.preventDefault?.();
+      if (rows.length > 0) {
+        setSelectedIdx((prev) => Math.min(prev + 1, rows.length - 1));
+      }
     } else if (event.name === "k" || event.name === "up") {
-      setSelectedIdx((prev) => Math.max(prev - 1, 0));
+      event.preventDefault?.();
+      if (rows.length > 0) {
+        setSelectedIdx((prev) => Math.max(prev - 1, 0));
+      }
     } else if (event.name === "d") {
-      const selected = allDisplayed[selectedIdx];
+      event.preventDefault?.();
+      const selected = rows[selectedIdx];
       if (selected) deleteAlert(selected.id);
     } else if (event.name === "return") {
-      const selected = allDisplayed[selectedIdx];
+      event.preventDefault?.();
+      const selected = rows[selectedIdx];
       if (selected?.status === "triggered") rearmAlert(selected.id);
     } else if (event.name === "a" || event.name === "n") {
-      startAdding();
+      event.preventDefault?.();
+      openSetAlertCommand();
     } else if (event.name === "escape") {
+      event.preventDefault?.();
       close?.();
     }
   });
@@ -192,174 +237,132 @@ function AlertsPane({ focused, width, height, close }: PaneProps) {
   // Keep selection in scroll view
   useEffect(() => {
     const sb = scrollRef.current;
-    if (!sb?.viewport || allDisplayed.length === 0 || selectedIdx < 0) return;
+    if (!sb?.viewport || rows.length === 0 || selectedIdx < 0) return;
     const viewportHeight = Math.max(sb.viewport.height, 1);
     if (selectedIdx < sb.scrollTop) {
       sb.scrollTo(selectedIdx);
     } else if (selectedIdx >= sb.scrollTop + viewportHeight) {
       sb.scrollTo(selectedIdx - viewportHeight + 1);
     }
-  }, [selectedIdx, allDisplayed.length]);
+  }, [selectedIdx, rows.length]);
 
-  const formFieldBg = (field: FormField) =>
-    formField === field ? colors.selected : colors.panel;
-  const formFieldFg = (field: FormField) =>
-    formField === field ? colors.selectedText : colors.text;
+  const renderCell = useCallback((
+    alert: AlertRule,
+    column: AlertColumn,
+    _index: number,
+    rowState: { selected: boolean; hovered: boolean },
+  ): DataTableCell => {
+    const selectedColor = rowState.selected ? colors.selectedText : undefined;
+    const actionMouseDown = (handler: () => void) => (event: any) => {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      handler();
+    };
 
-  const formView = (
-    <box flexDirection="column" paddingX={1} paddingY={1}>
-      <box height={1}>
-        <text fg={colors.textBright} attributes={TextAttributes.BOLD}>New Alert</text>
-      </box>
-      <box height={1} />
-      {/* Symbol */}
-      <box flexDirection="row" height={1}>
-        <box width={12}><text fg={colors.textDim}>Symbol</text></box>
-        <box backgroundColor={formFieldBg("symbol")} paddingX={1}>
-          <text fg={formFieldFg("symbol")}>
-            {formSymbol || (formField === "symbol" ? "▏" : "—")}
-            {formField === "symbol" && formSymbol ? "▏" : ""}
-          </text>
-        </box>
-      </box>
-      <box height={1} />
-      {/* Condition */}
-      <box flexDirection="row" height={1}>
-        <box width={12}><text fg={colors.textDim}>Condition</text></box>
-        <box backgroundColor={formFieldBg("condition")} paddingX={1} flexDirection="row">
-          {formField === "condition" && <text fg={colors.textDim}>◂ </text>}
-          <text fg={formFieldFg("condition")}>{CONDITION_LABELS[formCondition]}</text>
-          {formField === "condition" && <text fg={colors.textDim}> ▸</text>}
-        </box>
-      </box>
-      <box height={1} />
-      {/* Price */}
-      <box flexDirection="row" height={1}>
-        <box width={12}><text fg={colors.textDim}>Price</text></box>
-        <box backgroundColor={formFieldBg("price")} paddingX={1}>
-          <text fg={formFieldFg("price")}>
-            {formPrice || (formField === "price" ? "▏" : "—")}
-            {formField === "price" && formPrice ? "▏" : ""}
-          </text>
-        </box>
-      </box>
-      <box height={1} />
-      <text fg={colors.textMuted}>↑/↓ move field · ←/→ change condition · Enter submit · Esc cancel</text>
-    </box>
-  );
-
-  if (adding) {
-    return (
-      <box flexDirection="column" width={width} height={height}>
-        {formView}
-        <box flexGrow={1} />
-      </box>
-    );
-  }
-
-  if (allDisplayed.length === 0) {
-    return (
-      <box flexDirection="column" width={width} height={height} padding={1}>
-        <box flexDirection="row" height={1}>
-          <text fg={colors.textDim}>0 active</text>
-        </box>
-        <box flexGrow={1} justifyContent="center" alignItems="center">
-          <text fg={colors.textMuted}>No alerts. Press [a] to add one.</text>
-        </box>
-        <box height={1}>
-          <text fg={colors.textMuted}>[a]dd alert · Esc close</text>
-        </box>
-      </box>
-    );
-  }
-
-  let rowIndex = 0;
+    switch (column.id) {
+      case "status":
+        return {
+          text: column.width <= 4
+            ? (alert.status === "triggered" ? "Trig" : "Act")
+            : (alert.status === "triggered" ? "Triggered" : "Active"),
+          color: selectedColor ?? (alert.status === "triggered" ? colors.positive : colors.textDim),
+          attributes: alert.status === "triggered" ? TextAttributes.BOLD : TextAttributes.NONE,
+        };
+      case "symbol":
+        return {
+          text: alert.symbol,
+          color: selectedColor ?? colors.textBright,
+          attributes: TextAttributes.BOLD,
+        };
+      case "condition":
+        return {
+          text: column.width <= 5 && alert.condition === "crosses" ? "cross" : alert.condition,
+          color: selectedColor,
+        };
+      case "target":
+        return { text: String(alert.targetPrice), color: selectedColor };
+      case "last":
+        return {
+          text: alert.lastCheckedPrice == null ? "-" : String(alert.lastCheckedPrice),
+          color: selectedColor ?? colors.textDim,
+        };
+      case "triggered":
+        return {
+          text: alert.triggeredAt ? relativeTime(alert.triggeredAt) : "-",
+          color: selectedColor ?? colors.textDim,
+        };
+      case "rearm":
+        return alert.status === "triggered"
+          ? {
+              text: column.width <= 5 ? "Arm" : "Re-arm",
+              color: selectedColor ?? colors.textBright,
+              onMouseDown: actionMouseDown(() => rearmAlert(alert.id)),
+            }
+          : { text: "-", color: selectedColor ?? colors.textDim };
+      case "delete":
+        return {
+          text: column.width <= 3 ? "Del" : "Delete",
+          color: selectedColor ?? colors.negative,
+          onMouseDown: actionMouseDown(() => deleteAlert(alert.id)),
+        };
+    }
+  }, [deleteAlert, rearmAlert]);
 
   return (
-    <box flexDirection="column" width={width} height={height}>
-      {/* Header */}
-      <box flexDirection="row" height={1} paddingX={1}>
+    <box
+      flexDirection="column"
+      width={width}
+      height={height}
+      backgroundColor={colors.bg}
+    >
+      <box
+        flexDirection="row"
+        height={1}
+        paddingX={1}
+        backgroundColor={colors.bg}
+      >
         <text fg={colors.textDim}>{activeCount} active</text>
-      </box>
-
-      <scrollbox ref={scrollRef} flexGrow={1} scrollY focusable={false}>
-        <box flexDirection="column">
-          {/* Active section */}
-          {activeAlerts.length > 0 && (
-            <>
-              <box height={1} paddingX={1}>
-                <text fg={colors.textDim} attributes={TextAttributes.BOLD}>Active</text>
-              </box>
-              {activeAlerts.map((alert) => {
-                const idx = rowIndex++;
-                const isSelected = idx === selectedIdx;
-                const bg = isSelected ? colors.selected : undefined;
-                const fg = isSelected ? colors.selectedText : colors.text;
-                return (
-                  <box
-                    key={alert.id}
-                    flexDirection="row"
-                    paddingX={1}
-                    backgroundColor={bg}
-                    onMouseDown={() => setSelectedIdx(idx)}
-                  >
-                    <text fg={isSelected ? colors.selectedText : colors.textDim}>
-                      {conditionIcon(alert.condition)}{" "}
-                    </text>
-                    <text fg={isSelected ? colors.selectedText : colors.textBright} attributes={TextAttributes.BOLD}>
-                      {alert.symbol}
-                    </text>
-                    <text fg={fg}>{" "}{alert.condition} {alert.targetPrice}</text>
-                  </box>
-                );
-              })}
-            </>
-          )}
-
-          {/* Triggered section */}
-          {triggeredAlerts.length > 0 && (
-            <>
-              <box height={1} paddingX={1}>
-                <text fg={colors.textDim} attributes={TextAttributes.BOLD}>Triggered</text>
-              </box>
-              {triggeredAlerts.map((alert) => {
-                const idx = rowIndex++;
-                const isSelected = idx === selectedIdx;
-                const bg = isSelected ? colors.selected : undefined;
-                return (
-                  <box
-                    key={alert.id}
-                    flexDirection="row"
-                    paddingX={1}
-                    backgroundColor={bg}
-                    onMouseDown={() => setSelectedIdx(idx)}
-                  >
-                    <text fg={isSelected ? colors.selectedText : colors.positive}>
-                      {conditionIcon(alert.condition)}{" "}
-                    </text>
-                    <text fg={isSelected ? colors.selectedText : colors.positive} attributes={TextAttributes.BOLD}>
-                      {alert.symbol}
-                    </text>
-                    <text fg={isSelected ? colors.selectedText : colors.positive}>
-                      {" "}{alert.condition} {alert.targetPrice}
-                    </text>
-                    <text fg={isSelected ? colors.selectedText : colors.positive}> TRIGGERED</text>
-                    {alert.triggeredAt && (
-                      <text fg={isSelected ? colors.selectedText : colors.textDim}>
-                        {" "}{relativeTime(alert.triggeredAt)}
-                      </text>
-                    )}
-                  </box>
-                );
-              })}
-            </>
-          )}
+        {triggeredCount > 0 && (
+          <box marginLeft={1}>
+            <text fg={colors.textMuted}>{triggeredCount} triggered</text>
+          </box>
+        )}
+        <box flexGrow={1} />
+        <box
+          onMouseDown={(event: any) => {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            openSetAlertCommand();
+          }}
+        >
+          <text fg={colors.textBright} attributes={TextAttributes.BOLD}>
+            Add Alert
+          </text>
         </box>
-      </scrollbox>
-
-      <box height={1} paddingX={1}>
-        <text fg={colors.textMuted}>[a]dd alert · j/k navigate · d delete · Enter re-arm · Esc close</text>
       </box>
+
+      <DataTable<AlertRule, AlertColumn>
+        columns={columns}
+        items={rows}
+        sortColumnId={null}
+        sortDirection="asc"
+        onHeaderClick={() => {}}
+        headerScrollRef={headerScrollRef}
+        scrollRef={scrollRef}
+        syncHeaderScroll={syncHeaderScroll}
+        onBodyScrollActivity={handleBodyScrollActivity}
+        hoveredIdx={hoveredIdx}
+        setHoveredIdx={setHoveredIdx}
+        getItemKey={(alert) => alert.id}
+        isSelected={(_alert, index) => index === selectedIdx}
+        onSelect={(_alert, index) => setSelectedIdx(index)}
+        onActivate={(alert) => {
+          if (alert.status === "triggered") rearmAlert(alert.id);
+        }}
+        renderCell={renderCell}
+        emptyStateTitle="No alerts"
+        emptyStateHint="Use Add Alert to create one."
+      />
     </box>
   );
 }
@@ -386,9 +389,16 @@ export const alertsPlugin: GloomPlugin = {
   setup(ctx) {
     ctx.registerCommand({
       id: "set-alert",
-      label: "Set Alert",
-      keywords: ["alert", "price", "trigger", "notify", "alarm", "watch"],
+      label: "Add Alert",
+      description: "Create a price alert from a symbol, condition, and target price",
+      keywords: ["add", "set", "alert", "price", "trigger", "notify", "alarm", "watch"],
       category: "data",
+      shortcut: "SA",
+      shortcutArg: {
+        placeholder: "symbol condition price",
+        kind: "text",
+        parse: parseAlertShortcutValues,
+      },
       wizardLayout: "form",
       wizard: [
         {
@@ -415,14 +425,10 @@ export const alertsPlugin: GloomPlugin = {
         },
       ],
       async execute(values) {
-        const symbol = values?.symbol?.trim();
-        const condition = values?.condition as "above" | "below" | "crosses" | undefined;
-        const priceStr = values?.price?.trim();
-        if (!symbol || !condition || !priceStr) return;
-        const price = parseFloat(priceStr);
-        if (isNaN(price)) return;
+        const input = parseAlertCommandValues(values);
+        if (!input) return;
 
-        const alert = createAlert(symbol, condition, price);
+        const alert = createAlert(input.symbol, input.condition, input.price);
         const existing = loadAlerts(ctx);
         existing.push(alert);
         saveAlerts(ctx, existing);
