@@ -12,10 +12,16 @@ import { aiPlugin } from "./builtin/ai";
 import { gloomberbCloudPlugin } from "./builtin/chat";
 import { helpPlugin } from "./builtin/help";
 import { comparisonChartPlugin } from "./builtin/comparison-chart";
+import { econCalendarPlugin } from "./builtin/econ";
+import { worldIndicesPlugin } from "./builtin/world-indices";
+import { marketMoversPlugin } from "./builtin/market-movers";
 import { debugPlugin } from "./builtin/debug";
 import { layoutManagerPlugin } from "./builtin/layout-manager";
 import { yahooPlugin } from "./builtin/yahoo";
 import { predictionMarketsPlugin } from "./prediction-markets";
+import { correlationPlugin } from "./builtin/correlation";
+import { analyticsPlugin } from "./builtin/analytics";
+import { insiderPlugin } from "./builtin/insider";
 import { fxMatrixPlugin } from "./builtin/fx-matrix";
 import { yieldCurvePlugin } from "./builtin/yield-curve";
 import { sectorsPlugin } from "./builtin/sectors";
@@ -44,6 +50,12 @@ export const builtinPlugins: GloomPlugin[] = [
   helpPlugin,
   comparisonChartPlugin,
   predictionMarketsPlugin,
+  correlationPlugin,
+  analyticsPlugin,
+  insiderPlugin,
+  econCalendarPlugin,
+  worldIndicesPlugin,
+  marketMoversPlugin,
   fxMatrixPlugin,
   yieldCurvePlugin,
   sectorsPlugin,
