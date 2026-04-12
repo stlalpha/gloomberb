@@ -105,6 +105,10 @@ function createRegistrySpy(spy: { selected: string[]; focused: string[] }): Plug
     },
     selectTickerFn: (symbol: string) => { spy.selected.push(symbol); },
     focusPaneFn: (paneId: string) => { spy.focused.push(paneId); },
+    navigateTickerFn: (symbol: string) => {
+      spy.selected.push(symbol);
+      spy.focused.push("ticker-detail");
+    },
   } as unknown as PluginRegistry;
 }
 

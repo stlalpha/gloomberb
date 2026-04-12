@@ -169,6 +169,19 @@ export interface WizardStep {
   body?: string[];
 }
 
+export interface CommandShortcutArgContext {
+  activeTicker: string | null;
+}
+
+export interface CommandShortcutArgDef {
+  placeholder?: string;
+  kind?: "text" | "ticker" | "ticker-list";
+  parse?: (
+    arg: string,
+    context: CommandShortcutArgContext,
+  ) => Record<string, string>;
+}
+
 export interface CliHelpColumn {
   header: string;
   align?: "left" | "right" | "center";
@@ -243,6 +256,7 @@ export interface CommandDef {
   label: string;
   keywords: string[];
   shortcut?: string;
+  shortcutArg?: CommandShortcutArgDef;
   execute: (values?: Record<string, string>) => void | Promise<void>;
   category: "navigation" | "data" | "portfolio" | "config";
   description?: string;
@@ -366,6 +380,8 @@ export interface AppNotificationRequest {
   type?: AppNotificationType;
   toast?: boolean;
   desktop?: AppDesktopNotificationMode;
+  persistent?: boolean;
+  sound?: string;
   action?: {
     label: string;
     onClick: () => void;
