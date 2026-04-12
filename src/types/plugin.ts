@@ -368,6 +368,10 @@ export interface AppNotificationRequest {
   /** If true, in-app toast stays visible until user dismisses it */
   persistent?: boolean;
   desktop?: AppDesktopNotificationMode;
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
   /** macOS sound name (e.g., "Glass", "Ping", "Hero"). Ignored on other platforms. */
   sound?: string;
 }
