@@ -6,7 +6,7 @@ import { toTimestampMillis } from "../utils/timestamp";
 import { DataTableStackView } from "./data-table-stack-view";
 import { ExternalLink, type DataTableCell, type DataTableColumn } from "./ui";
 
-export interface DataTableDetailItem {
+export interface FeedDataTableItem {
   id: string;
   eyebrow?: string;
   title: string;
@@ -22,7 +22,7 @@ type DetailColumnId = "time" | "source" | "title";
 type DetailColumn = DataTableColumn & { id: DetailColumnId };
 
 interface DetailRow {
-  item: DataTableDetailItem;
+  item: FeedDataTableItem;
   itemIndex: number;
 }
 
@@ -31,11 +31,11 @@ interface SortPreference {
   direction: "asc" | "desc";
 }
 
-interface DataTableDetailViewProps {
+interface FeedDataTableStackViewProps {
   width: number;
   height: number;
   focused: boolean;
-  items: DataTableDetailItem[];
+  items: FeedDataTableItem[];
   selectedIdx: number;
   onSelect: (index: number) => void;
   sourceLabel?: string;
@@ -127,7 +127,7 @@ function wrapTextLines(
   return lines;
 }
 
-function timestampValue(item: DataTableDetailItem): number {
+function timestampValue(item: FeedDataTableItem): number {
   if (!item.timestamp) return 0;
   const timestamp = toTimestampMillis(item.timestamp);
   return Number.isFinite(timestamp) ? timestamp : 0;
@@ -169,7 +169,7 @@ function buildColumns(
   width: number,
   sourceLabel: string,
   titleLabel: string,
-  items: DataTableDetailItem[],
+  items: FeedDataTableItem[],
 ): DetailColumn[] {
   const timeWidth = 8;
   const sourceWidth = Math.min(
@@ -192,7 +192,7 @@ function buildColumns(
   ];
 }
 
-export function DataTableDetailView({
+export function FeedDataTableStackView({
   width,
   height,
   focused,
@@ -203,7 +203,7 @@ export function DataTableDetailView({
   titleLabel = "Headline",
   emptyStateTitle = "No items.",
   emptyStateHint,
-}: DataTableDetailViewProps) {
+}: FeedDataTableStackViewProps) {
   const [sortPreference, setSortPreference] = useState<SortPreference>({
     columnId: "time",
     direction: "desc",

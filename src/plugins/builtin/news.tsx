@@ -7,7 +7,7 @@ import { useArticleSummary, useNewsQuery, useResolvedEntryValue } from "../../ma
 import { instrumentFromTicker } from "../../market-data/request-types";
 import { usePluginPaneState } from "../../plugins/plugin-runtime";
 import { Spinner } from "../../components/spinner";
-import { DataTableDetailView, type DataTableDetailItem } from "../../components";
+import { FeedDataTableStackView, type FeedDataTableItem } from "../../components";
 
 const ARTICLE_SUMMARY_CACHE_POLICY = {
   staleMs: 30 * 24 * 60 * 60_000,
@@ -20,7 +20,7 @@ function getFeedItems(
   selectedUrl: string | undefined,
   summaryCache: Map<string, string>,
   loadingSummary: boolean,
-): DataTableDetailItem[] {
+): FeedDataTableItem[] {
   return news.map((item) => {
     const preview = summaryCache.get(item.url) ?? item.summary ?? undefined;
     const isSelected = item.url === selectedUrl;
@@ -99,7 +99,7 @@ function NewsTab({ width, height, focused }: DetailTabProps) {
   const items = getFeedItems(news, selected?.url, summaryCache, loadingSummary);
 
   return (
-    <DataTableDetailView
+    <FeedDataTableStackView
       width={width}
       height={height}
       focused={focused}

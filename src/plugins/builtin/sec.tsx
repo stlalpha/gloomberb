@@ -7,7 +7,7 @@ import { usePluginPaneState } from "../../plugins/plugin-runtime";
 import { usePaneTicker } from "../../state/app-context";
 import { colors } from "../../theme/colors";
 import { Spinner } from "../../components/spinner";
-import { DataTableDetailView, type DataTableDetailItem } from "../../components";
+import { FeedDataTableStackView, type FeedDataTableItem } from "../../components";
 import { isUsEquityTicker } from "../../utils/sec";
 import { getSharedMarketDataCoordinator } from "../../market-data/coordinator";
 import { parseForm4Xml, transactionTypeLabel } from "./insider/insider-data";
@@ -178,7 +178,7 @@ function toFeedItems(
   selectedAccessionNumber: string | undefined,
   contentCache: Map<string, string | null>,
   loadingContent: boolean,
-): DataTableDetailItem[] {
+): FeedDataTableItem[] {
   return filings.map((filing) => {
     const displayTitle = getFilingDisplayTitle(filing);
     const formDesc = getFormDescription(filing.form);
@@ -312,7 +312,7 @@ function SecTab({ width, height, focused }: DetailTabProps) {
   if (filings.length === 0) return renderNotice(`No recent SEC filings for ${ticker.metadata.ticker}.`, width);
 
   return (
-    <DataTableDetailView
+    <FeedDataTableStackView
       width={width}
       height={height}
       focused={focused}

@@ -4,17 +4,17 @@ import { testRender } from "@opentui/react/test-utils";
 import { AppContext, PaneInstanceProvider, createInitialState } from "../state/app-context";
 import { createDefaultConfig } from "../types/config";
 import {
-  DataTableDetailView,
-  type DataTableDetailItem,
-} from "./detail-data-table-view";
+  FeedDataTableStackView,
+  type FeedDataTableItem,
+} from "./feed-data-table-stack-view";
 
 let testSetup: Awaited<ReturnType<typeof testRender>> | undefined;
 let setHarnessItems:
-  | ((items: DataTableDetailItem[]) => void)
+  | ((items: FeedDataTableItem[]) => void)
   | undefined;
 let harnessSelectedIdx = 0;
 
-const items: DataTableDetailItem[] = [
+const items: FeedDataTableItem[] = [
   {
     id: "1",
     eyebrow: "Reuters",
@@ -71,7 +71,7 @@ function Harness({
   return (
     <AppContext value={{ state, dispatch: () => {} }}>
       <PaneInstanceProvider paneId="portfolio-list:main">
-        <DataTableDetailView
+        <FeedDataTableStackView
           width={width}
           height={height}
           focused
@@ -101,7 +101,7 @@ async function clickAt(x: number, y: number) {
   });
 }
 
-describe("DataTableDetailView", () => {
+describe("FeedDataTableStackView", () => {
   test("renders a DataTable list by default", async () => {
     testSetup = await testRender(<Harness width={90} height={16} />, {
       width: 90,
