@@ -511,6 +511,18 @@ describe("prediction markets pane interactions", () => {
       ]?.selectedDetailMarketKey,
     ).toBe("kalshi:KXFED-27APR-T4.50");
 
+    await emitKeypress(testSetup, { name: "escape", sequence: "\u001b" });
+    await flushFrames(testSetup);
+
+    const escapeFrame = testSetup.captureCharFrame();
+    expect(escapeFrame).toContain("<- Back");
+    expect(escapeFrame).toContain("Rule 2");
+    expect(
+      harnessStateRef.current?.paneState[TEST_PANE_ID]?.pluginState?.[
+        "prediction-markets"
+      ]?.selectedDetailMarketKey,
+    ).toBe("kalshi:KXFED-27APR-T4.50");
+
     await emitKeypress(testSetup, { name: "backspace", sequence: "\u007f" });
     await flushFrames(testSetup);
 

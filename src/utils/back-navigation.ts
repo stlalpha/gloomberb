@@ -25,3 +25,9 @@ export function isPlainEscape(event: BackNavigationEventLike): boolean {
 export function isBackNavigationKey(event: BackNavigationEventLike): boolean {
   return isPlainBackspace(event) || isPlainEscape(event);
 }
+
+export function isDetailBackNavigationKey(
+  event: BackNavigationEventLike,
+): boolean {
+  return isPlainBackspace(event);
+}

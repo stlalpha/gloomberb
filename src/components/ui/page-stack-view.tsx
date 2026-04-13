@@ -1,7 +1,7 @@
 import { useKeyboard } from "@opentui/react";
 import type { ReactNode } from "react";
 import { colors } from "../../theme/colors";
-import { isBackNavigationKey } from "../../utils/back-navigation";
+import { isDetailBackNavigationKey } from "../../utils/back-navigation";
 
 interface PageStackViewProps {
   focused: boolean;
@@ -23,7 +23,7 @@ export function PageStackView({
   backHint,
 }: PageStackViewProps) {
   useKeyboard((event) => {
-    if (!focused || !detailOpen || !isBackNavigationKey(event)) return;
+    if (!focused || !detailOpen || !isDetailBackNavigationKey(event)) return;
     event.stopPropagation?.();
     event.preventDefault?.();
     onBack();

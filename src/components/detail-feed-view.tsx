@@ -2,7 +2,6 @@ import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { colors, hoverBg } from "../theme/colors";
-import { isBackNavigationKey } from "../utils/back-navigation";
 import { formatTimeAgo } from "../utils/format";
 import { ExternalLink, PageStackView } from "./ui";
 
@@ -228,11 +227,7 @@ export function DetailFeedView({
     if (!focused || items.length === 0) return;
 
     if (openItem) {
-      if (isBackNavigationKey(event)) {
-        event.stopPropagation?.();
-        event.preventDefault?.();
-        setOpenItemId(null);
-      } else if (event.name === "j" || event.name === "down") {
+      if (event.name === "j" || event.name === "down") {
         event.stopPropagation?.();
         event.preventDefault?.();
         scrollDetailBy(1);
