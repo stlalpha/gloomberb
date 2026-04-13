@@ -7,7 +7,7 @@ import { usePluginPaneState } from "../../plugins/plugin-runtime";
 import { usePaneTicker } from "../../state/app-context";
 import { colors } from "../../theme/colors";
 import { Spinner } from "../../components/spinner";
-import { DetailFeedView, type DetailFeedItem } from "../../components/detail-feed-view";
+import { DataTableDetailView, type DataTableDetailItem } from "../../components";
 import { isUsEquityTicker } from "../../utils/sec";
 import { getSharedMarketDataCoordinator } from "../../market-data/coordinator";
 import { parseForm4Xml, transactionTypeLabel } from "./insider/insider-data";
@@ -178,7 +178,7 @@ function toFeedItems(
   selectedAccessionNumber: string | undefined,
   contentCache: Map<string, string | null>,
   loadingContent: boolean,
-): DetailFeedItem[] {
+): DataTableDetailItem[] {
   return filings.map((filing) => {
     const displayTitle = getFilingDisplayTitle(filing);
     const formDesc = getFormDescription(filing.form);
@@ -230,7 +230,6 @@ function SecTab({ width, height, focused }: DetailTabProps) {
   const { ticker } = usePaneTicker();
   const selectionKey = `selectedIdx:${ticker?.metadata.ticker ?? "none"}`;
   const [selectedIdx, setSelectedIdx] = usePluginPaneState<number>(selectionKey, 0);
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [contentCache, setContentCache] = useState<Map<string, string | null>>(new Map());
   const contentFetchRef = useRef(0);
   const eligibleTicker = isUsEquityTicker(ticker);
@@ -245,7 +244,6 @@ function SecTab({ width, height, focused }: DetailTabProps) {
   const error = filingsEntry?.phase === "error" ? filingsEntry.error?.message ?? "Failed to load SEC filings" : null;
 
   useEffect(() => {
-    setHoveredIdx(null);
     setContentCache(new Map());
     contentFetchRef.current += 1;
   }, [eligibleTicker, ticker?.metadata.exchange, ticker?.metadata.ticker]);
@@ -314,16 +312,16 @@ function SecTab({ width, height, focused }: DetailTabProps) {
   if (filings.length === 0) return renderNotice(`No recent SEC filings for ${ticker.metadata.ticker}.`, width);
 
   return (
-    <DetailFeedView
+    <DataTableDetailView
       width={width}
       height={height}
       focused={focused}
       items={toFeedItems(filings, selected?.accessionNumber, contentCache, loadingContent)}
       selectedIdx={selectedIdx}
-      hoveredIdx={hoveredIdx}
       onSelect={setSelectedIdx}
-      onHover={setHoveredIdx}
-      listVariant="single-line"
+      sourceLabel="Form"
+      titleLabel="Filing"
+      emptyStateTitle="No SEC filings."
     />
   );
 }

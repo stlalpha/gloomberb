@@ -7,7 +7,7 @@ import { useArticleSummary, useNewsQuery, useResolvedEntryValue } from "../../ma
 import { instrumentFromTicker } from "../../market-data/request-types";
 import { usePluginPaneState } from "../../plugins/plugin-runtime";
 import { Spinner } from "../../components/spinner";
-import { DetailFeedView, type DetailFeedItem } from "../../components/detail-feed-view";
+import { DataTableDetailView, type DataTableDetailItem } from "../../components";
 
 const ARTICLE_SUMMARY_CACHE_POLICY = {
   staleMs: 30 * 24 * 60 * 60_000,
@@ -20,7 +20,7 @@ function getFeedItems(
   selectedUrl: string | undefined,
   summaryCache: Map<string, string>,
   loadingSummary: boolean,
-): DetailFeedItem[] {
+): DataTableDetailItem[] {
   return news.map((item) => {
     const preview = summaryCache.get(item.url) ?? item.summary ?? undefined;
     const isSelected = item.url === selectedUrl;
@@ -53,7 +53,6 @@ function NewsTab({ width, height, focused }: DetailTabProps) {
   const { ticker } = usePaneTicker();
   const selectionKey = `selectedIdx:${ticker?.metadata.ticker ?? "none"}`;
   const [selectedIdx, setSelectedIdx] = usePluginPaneState<number>(selectionKey, 0);
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [summaryCache, setSummaryCache] = useState<Map<string, string>>(new Map());
   const summaryFetchRef = useRef(0);
   const instrument = instrumentFromTicker(ticker, ticker?.metadata.ticker ?? null);
@@ -65,7 +64,6 @@ function NewsTab({ width, height, focused }: DetailTabProps) {
   useEffect(() => {
     summaryFetchRef.current += 1;
     setSummaryCache(new Map());
-    setHoveredIdx(null);
   }, [ticker?.metadata.ticker]);
 
   const selected = news[selectedIdx];
@@ -101,16 +99,16 @@ function NewsTab({ width, height, focused }: DetailTabProps) {
   const items = getFeedItems(news, selected?.url, summaryCache, loadingSummary);
 
   return (
-    <DetailFeedView
+    <DataTableDetailView
       width={width}
       height={height}
       focused={focused}
       items={items}
       selectedIdx={selectedIdx}
-      hoveredIdx={hoveredIdx}
       onSelect={setSelectedIdx}
-      onHover={setHoveredIdx}
-      listVariant="single-line"
+      sourceLabel="Source"
+      titleLabel="Headline"
+      emptyStateTitle="No news."
     />
   );
 }

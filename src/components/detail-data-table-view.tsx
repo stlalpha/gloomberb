@@ -1,0 +1,493 @@
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
+import { useKeyboard } from "@opentui/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { colors } from "../theme/colors";
+import { formatTimeAgo } from "../utils/format";
+import { toTimestampMillis } from "../utils/timestamp";
+import {
+  DataTable,
+  ExternalLink,
+  PageStackView,
+  type DataTableCell,
+  type DataTableColumn,
+} from "./ui";
+
+export interface DataTableDetailItem {
+  id: string;
+  eyebrow?: string;
+  title: string;
+  timestamp?: Date | string | null;
+  preview?: string | null;
+  detailTitle?: string;
+  detailMeta?: string[];
+  detailBody?: string | null;
+  detailNote?: string | null;
+}
+
+type DetailColumnId = "time" | "source" | "title";
+type DetailColumn = DataTableColumn & { id: DetailColumnId };
+
+interface DetailRow {
+  item: DataTableDetailItem;
+  itemIndex: number;
+}
+
+interface SortPreference {
+  columnId: DetailColumnId;
+  direction: "asc" | "desc";
+}
+
+interface DataTableDetailViewProps {
+  width: number;
+  height: number;
+  focused: boolean;
+  items: DataTableDetailItem[];
+  selectedIdx: number;
+  onSelect: (index: number) => void;
+  sourceLabel?: string;
+  titleLabel?: string;
+  emptyStateTitle?: string;
+  emptyStateHint?: string;
+}
+
+function truncateWithEllipsis(text: string, width: number): string {
+  if (width <= 0) return "";
+  if (text.length <= width) return text;
+  if (width <= 3) return text.slice(0, width);
+  return `${text.slice(0, width - 3)}...`;
+}
+
+function wrapTextLines(
+  text: string,
+  width: number,
+  maxLines = Number.MAX_SAFE_INTEGER,
+): string[] {
+  if (width <= 0) return [];
+
+  const paragraphs = text
+    .split(/\r?\n/)
+    .map((paragraph) => paragraph.replace(/\s+/g, " ").trim());
+  const lines: string[] = [];
+
+  const pushLine = (line: string) => {
+    if (lines.length >= maxLines) return;
+    lines.push(line);
+  };
+
+  for (
+    let paragraphIndex = 0;
+    paragraphIndex < paragraphs.length;
+    paragraphIndex += 1
+  ) {
+    const paragraph = paragraphs[paragraphIndex]!;
+    if (!paragraph) {
+      pushLine("");
+      continue;
+    }
+
+    let current = "";
+    for (const rawWord of paragraph.split(" ")) {
+      let word = rawWord;
+      while (word.length > width) {
+        const available = current ? width - current.length - 1 : width;
+        if (available <= 0) {
+          pushLine(current);
+          current = "";
+          continue;
+        }
+        if (word.length <= available) break;
+        const piece = word.slice(0, available);
+        word = word.slice(available);
+        pushLine(current ? `${current} ${piece}` : piece);
+        current = "";
+      }
+
+      if (!current) {
+        current = word;
+        continue;
+      }
+
+      if (current.length + 1 + word.length <= width) {
+        current = `${current} ${word}`;
+      } else {
+        pushLine(current);
+        current = word;
+      }
+    }
+
+    if (current) pushLine(current);
+    if (paragraphIndex < paragraphs.length - 1) pushLine("");
+    if (lines.length >= maxLines) break;
+  }
+
+  if (
+    lines.length === maxLines
+    && paragraphs.join(" ").length > lines.join(" ").length
+  ) {
+    lines[maxLines - 1] = truncateWithEllipsis(
+      lines[maxLines - 1] ?? "",
+      width,
+    );
+  }
+
+  return lines;
+}
+
+function timestampValue(item: DataTableDetailItem): number {
+  if (!item.timestamp) return 0;
+  const timestamp = toTimestampMillis(item.timestamp);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function compareText(a: string, b: string): number {
+  return a.localeCompare(b, "en-US", { sensitivity: "base" });
+}
+
+function compareRows(a: DetailRow, b: DetailRow, columnId: DetailColumnId) {
+  switch (columnId) {
+    case "time":
+      return timestampValue(a.item) - timestampValue(b.item);
+    case "source":
+      return compareText(a.item.eyebrow ?? "", b.item.eyebrow ?? "");
+    case "title":
+      return compareText(a.item.title, b.item.title);
+  }
+}
+
+function nextSortPreference(
+  current: SortPreference,
+  columnId: DetailColumnId,
+): SortPreference {
+  if (current.columnId === columnId) {
+    return {
+      columnId,
+      direction: current.direction === "asc" ? "desc" : "asc",
+    };
+  }
+
+  return {
+    columnId,
+    direction: columnId === "time" ? "desc" : "asc",
+  };
+}
+
+function buildColumns(
+  width: number,
+  sourceLabel: string,
+  titleLabel: string,
+  items: DataTableDetailItem[],
+): DetailColumn[] {
+  const timeWidth = 8;
+  const sourceWidth = Math.min(
+    Math.max(
+      sourceLabel.length,
+      ...items.map((item) => item.eyebrow?.length ?? 0),
+      6,
+    ),
+    14,
+  );
+  const titleWidth = Math.max(
+    16,
+    width - (timeWidth + 1) - (sourceWidth + 1) - 3,
+  );
+
+  return [
+    { id: "time", label: "Time", width: timeWidth, align: "left" },
+    { id: "source", label: sourceLabel, width: sourceWidth, align: "left" },
+    { id: "title", label: titleLabel, width: titleWidth, align: "left" },
+  ];
+}
+
+export function DataTableDetailView({
+  width,
+  height,
+  focused,
+  items,
+  selectedIdx,
+  onSelect,
+  sourceLabel = "Source",
+  titleLabel = "Headline",
+  emptyStateTitle = "No items.",
+  emptyStateHint,
+}: DataTableDetailViewProps) {
+  const [sortPreference, setSortPreference] = useState<SortPreference>({
+    columnId: "time",
+    direction: "desc",
+  });
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const headerScrollRef = useRef<ScrollBoxRenderable>(null);
+  const scrollRef = useRef<ScrollBoxRenderable>(null);
+  const detailScrollRef = useRef<ScrollBoxRenderable>(null);
+  const detailTextWidth = Math.max(width - 2, 12);
+  const detailHeight = Math.max(height - 1, 4);
+  const columns = useMemo(
+    () => buildColumns(width, sourceLabel, titleLabel, items),
+    [items, sourceLabel, titleLabel, width],
+  );
+  const sortedRows = useMemo(() => {
+    const direction = sortPreference.direction === "asc" ? 1 : -1;
+    return items
+      .map((item, itemIndex) => ({ item, itemIndex }))
+      .sort((a, b) => {
+        const primary = compareRows(a, b, sortPreference.columnId) * direction;
+        return primary !== 0 ? primary : a.itemIndex - b.itemIndex;
+      });
+  }, [items, sortPreference]);
+  const selectedRowIndex = sortedRows.findIndex(
+    (row) => row.itemIndex === selectedIdx,
+  );
+  const activeRowIndex =
+    selectedRowIndex >= 0 ? selectedRowIndex : sortedRows.length > 0 ? 0 : -1;
+  const openItem = useMemo(
+    () =>
+      openItemId
+        ? items.find((item) => item.id === openItemId) ?? null
+        : null,
+    [items, openItemId],
+  );
+
+  const syncHeaderScroll = useCallback(() => {
+    const body = scrollRef.current;
+    const header = headerScrollRef.current;
+    if (!body || !header) return;
+    if (header.scrollLeft !== body.scrollLeft) {
+      header.scrollLeft = body.scrollLeft;
+    }
+  }, []);
+
+  const handleBodyScrollActivity = useCallback(() => {
+    queueMicrotask(syncHeaderScroll);
+  }, [syncHeaderScroll]);
+
+  const scrollDetailBy = useCallback((delta: number) => {
+    const scrollBox = detailScrollRef.current;
+    if (!scrollBox?.viewport) return;
+    const maxScrollTop = Math.max(
+      0,
+      scrollBox.scrollHeight - scrollBox.viewport.height,
+    );
+    scrollBox.scrollTop = Math.max(
+      0,
+      Math.min(maxScrollTop, scrollBox.scrollTop + delta),
+    );
+  }, []);
+
+  const openRow = useCallback((row: DetailRow | undefined) => {
+    if (!row) return;
+    setOpenItemId(row.item.id);
+  }, []);
+
+  const selectRow = useCallback((rowIndex: number) => {
+    const row = sortedRows[rowIndex];
+    if (!row) return;
+    onSelect(row.itemIndex);
+  }, [onSelect, sortedRows]);
+
+  const handleSelectRow = useCallback((row: DetailRow) => {
+    if (row.itemIndex === selectedIdx) {
+      openRow(row);
+      return;
+    }
+    onSelect(row.itemIndex);
+  }, [onSelect, openRow, selectedIdx]);
+
+  useEffect(() => {
+    if (openItemId && !openItem) {
+      setOpenItemId(null);
+    }
+  }, [openItem, openItemId]);
+
+  useEffect(() => {
+    if (!openItemId) return;
+    const scrollBox = detailScrollRef.current;
+    if (scrollBox) scrollBox.scrollTop = 0;
+  }, [openItemId]);
+
+  useEffect(() => {
+    if (items.length > 0 && selectedIdx >= items.length) {
+      onSelect(Math.max(0, items.length - 1));
+    }
+  }, [items.length, onSelect, selectedIdx]);
+
+  useEffect(() => {
+    const scrollBox = scrollRef.current;
+    if (!scrollBox?.viewport || activeRowIndex < 0) return;
+    const viewportHeight = Math.max(scrollBox.viewport.height, 1);
+    if (activeRowIndex < scrollBox.scrollTop) {
+      scrollBox.scrollTo(activeRowIndex);
+    } else if (activeRowIndex >= scrollBox.scrollTop + viewportHeight) {
+      scrollBox.scrollTo(activeRowIndex - viewportHeight + 1);
+    }
+  }, [activeRowIndex, sortedRows.length]);
+
+  useKeyboard((event) => {
+    if (!focused || items.length === 0) return;
+
+    if (openItem) {
+      if (event.name === "j" || event.name === "down") {
+        event.stopPropagation?.();
+        event.preventDefault?.();
+        scrollDetailBy(1);
+      } else if (event.name === "k" || event.name === "up") {
+        event.stopPropagation?.();
+        event.preventDefault?.();
+        scrollDetailBy(-1);
+      }
+      return;
+    }
+
+    if (event.name === "j" || event.name === "down") {
+      event.stopPropagation?.();
+      event.preventDefault?.();
+      selectRow(
+        activeRowIndex >= 0
+          ? Math.min(activeRowIndex + 1, sortedRows.length - 1)
+          : 0,
+      );
+      return;
+    }
+
+    if (event.name === "k" || event.name === "up") {
+      event.stopPropagation?.();
+      event.preventDefault?.();
+      selectRow(activeRowIndex > 0 ? activeRowIndex - 1 : 0);
+      return;
+    }
+
+    if (event.name === "enter" || event.name === "return") {
+      event.stopPropagation?.();
+      event.preventDefault?.();
+      openRow(sortedRows[activeRowIndex]);
+    }
+  });
+
+  const renderCell = useCallback((
+    row: DetailRow,
+    column: DetailColumn,
+    _index: number,
+    rowState: { selected: boolean },
+  ): DataTableCell => {
+    const selectedColor = rowState.selected ? colors.selectedText : undefined;
+    switch (column.id) {
+      case "time":
+        return {
+          text: row.item.timestamp ? formatTimeAgo(row.item.timestamp) : "",
+          color: selectedColor ?? colors.textDim,
+        };
+      case "source":
+        return {
+          text: row.item.eyebrow ?? "",
+          color: selectedColor ?? colors.textMuted,
+        };
+      case "title":
+        return {
+          text: row.item.title,
+          color: selectedColor ?? colors.text,
+          attributes: rowState.selected
+            ? TextAttributes.BOLD
+            : TextAttributes.NONE,
+        };
+    }
+  }, []);
+
+  const rootContent = (
+    <DataTable<DetailRow, DetailColumn>
+      columns={columns}
+      items={sortedRows}
+      sortColumnId={sortPreference.columnId}
+      sortDirection={sortPreference.direction}
+      onHeaderClick={(columnId) =>
+        setSortPreference((current) =>
+          nextSortPreference(current, columnId as DetailColumnId)
+        )}
+      headerScrollRef={headerScrollRef}
+      scrollRef={scrollRef}
+      syncHeaderScroll={syncHeaderScroll}
+      onBodyScrollActivity={handleBodyScrollActivity}
+      hoveredIdx={hoveredIdx}
+      setHoveredIdx={setHoveredIdx}
+      getItemKey={(row) => row.item.id}
+      isSelected={(row, index) =>
+        row.itemIndex === selectedIdx || (selectedIdx < 0 && index === 0)
+      }
+      onSelect={handleSelectRow}
+      onActivate={openRow}
+      renderCell={renderCell}
+      emptyStateTitle={emptyStateTitle}
+      emptyStateHint={emptyStateHint}
+      showHorizontalScrollbar={false}
+    />
+  );
+
+  const detailContent = openItem ? (
+    <box flexDirection="column" flexGrow={1} paddingX={1}>
+      <scrollbox
+        ref={detailScrollRef}
+        height={detailHeight}
+        scrollY
+        focusable={false}
+      >
+        <box flexDirection="column">
+          {wrapTextLines(
+            openItem.detailTitle ?? openItem.title,
+            detailTextWidth,
+            4,
+          ).map((line, index) => (
+            <box key={`title-${index}`} height={1}>
+              <text attributes={TextAttributes.BOLD} fg={colors.textBright}>
+                {line}
+              </text>
+            </box>
+          ))}
+
+          {(openItem.detailMeta ?? [])
+            .flatMap((entry) => wrapTextLines(entry, detailTextWidth, 2))
+            .map((line, index) => (
+              <box key={`meta-${index}`} height={1}>
+                <text fg={colors.textMuted}>{line}</text>
+              </box>
+            ))}
+
+          <box height={1} />
+
+          {wrapTextLines(openItem.detailBody ?? "", detailTextWidth).map(
+            (line, index) => (
+              <box key={`body-${index}`} height={1}>
+                <text fg={colors.text}>{line}</text>
+              </box>
+            ),
+          )}
+
+          {openItem.detailNote ? (
+            <>
+              <box height={1} />
+              {wrapTextLines(openItem.detailNote, detailTextWidth).map(
+                (line, index) =>
+                  /^https?:\/\/\S+$/.test(line.trim()) ? (
+                    <ExternalLink key={`note-${index}`} url={line.trim()} />
+                  ) : (
+                    <box key={`note-${index}`} height={1}>
+                      <text fg={colors.textDim}>{line}</text>
+                    </box>
+                  ),
+              )}
+            </>
+          ) : null}
+        </box>
+      </scrollbox>
+    </box>
+  ) : (
+    <box flexGrow={1} />
+  );
+
+  return (
+    <PageStackView
+      focused={focused}
+      detailOpen={!!openItem}
+      onBack={() => setOpenItemId(null)}
+      rootContent={rootContent}
+      detailContent={detailContent}
+    />
+  );
+}
