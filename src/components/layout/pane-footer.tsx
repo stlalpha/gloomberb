@@ -54,6 +54,11 @@ const PaneFooterContext = createContext<PaneFooterContextValue | null>(null);
 
 const EMPTY_FOOTER: CombinedPaneFooter = { info: [], hints: [] };
 
+export function hasPaneFooterContent(footer?: CombinedPaneFooter | null): boolean {
+  if (!footer) return false;
+  return footer.info.length > 0 || footer.hints.length > 0;
+}
+
 function combineRegistrations(registrations: Map<string, PaneFooterRegistration>): CombinedPaneFooter {
   if (registrations.size === 0) return EMPTY_FOOTER;
 
@@ -355,7 +360,7 @@ export function PaneFooterBar({
 }) {
   const { nativePaneChrome } = useUiCapabilities();
   const resolvedFooter = footer ?? EMPTY_FOOTER;
-  const empty = resolvedFooter.info.length === 0 && resolvedFooter.hints.length === 0;
+  const empty = !hasPaneFooterContent(resolvedFooter);
   const borderColor = focused ? colors.borderFocused : colors.border;
   const reservedRight = Math.max(0, reserveRight);
 
