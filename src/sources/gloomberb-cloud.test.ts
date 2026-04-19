@@ -389,7 +389,7 @@ describe("GloomberbCloudProvider", () => {
     const source = createGloomberbCloudNewsSource();
     const news = await source.fetchNews({ feed: "top", ticker: "SNY" });
 
-    expect(news[0]?.tickers).toEqual(["SNY:NASDAQ", "MRNA:NASDAQ"]);
+    expect(news[0]?.tickers).toEqual(["SNY", "MRNA"]);
     expect(news[0]?.importance).toBe(77);
     expect(news[0]?.scores).toEqual({
       importance: 77,

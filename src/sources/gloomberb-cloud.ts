@@ -12,7 +12,6 @@ import {
   type CloudCompanyProfile,
   type CloudFundamentals,
   type CloudMarketResponse,
-  type CloudNewsTickerLinkPayload,
   type CloudNewsPayload,
   type CloudPricePointPayload,
   type CloudQuotePayload,
@@ -20,6 +19,7 @@ import {
 import type { NewsArticle, NewsQuery, NewsSource } from "../types/news-source";
 import { normalizePriceValueByDivisor, resolveCurrencyUnit } from "../utils/currency-units";
 import { canonicalTickerKey, publicExchange } from "../utils/exchanges";
+import { collectNewsDisplayTickers } from "../news/ticker-symbols";
 import { createProviderMiss } from "./provider-errors";
 
 const providerId = "gloomberb-cloud" as const;
@@ -108,21 +108,12 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
-function normalizeTickerLabel(value: string | null | undefined): string | null {
-  const normalized = value?.trim().toUpperCase();
-  return normalized ? normalized : null;
-}
-
-function displayTickerForLink(link: CloudNewsTickerLinkPayload): string | null {
-  return normalizeTickerLabel(link.canonicalTicker) ?? normalizeTickerLabel(link.symbol);
-}
-
 function mapCloudNewsTickers(item: CloudNewsPayload, fallbackTicker?: string): string[] {
-  const tickers = uniqueStrings(item.tickerLinks.flatMap((link) => displayTickerForLink(link) ?? []));
-  const fallback = normalizeTickerLabel(fallbackTicker);
-  if (fallback && tickers.length === 0) {
-    tickers.push(fallback);
-  }
+  const tickers = collectNewsDisplayTickers(
+    item.tickerLinks.flatMap((link) => [link.symbol, link.canonicalTicker]),
+  );
+  const fallbackTickers = collectNewsDisplayTickers([fallbackTicker]);
+  if (tickers.length === 0) tickers.push(...fallbackTickers);
   return tickers;
 }
 
